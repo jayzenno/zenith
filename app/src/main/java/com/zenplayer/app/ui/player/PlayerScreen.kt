@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -90,7 +91,7 @@ fun PlayerScreen(
     LaunchedEffect(status) {
         if (status == PlaybackStatus.Loading) {
             loadingTimeout.value = false
-            kotlinx.coroutines.delay(15000L)
+            delay(15000L)
             if (status == PlaybackStatus.Loading) {
                 loadingTimeout.value = true
             }
