@@ -1,17 +1,17 @@
 allprojects {
     repositories {
-        def JCENTER_URL = 'https://jcenter.bintray.com/'
-        def GOOGLE_URL = 'https://dl.google.com/dl/android/maven2/'
         def MAVEN_CENTRAL = 'https://repo.maven.apache.org/maven2/'
-        
+        def GOOGLE_MIRROR_URL_1 = 'https://maven.aliyun.com/repository/google'
+
+        mavenCentral()
         maven {
-            url GOOGLE_URL
+            url GOOGLE_MIRROR_URL_1
             allowInsecureProtocol false
         }
         maven {
             url MAVEN_CENTRAL
             allowInsecureProtocol false
         }
-        mavenCentral()
+        google()
     }
 }
