@@ -154,11 +154,12 @@ fun PlayerScreen(
                 Box(Modifier.clip(RoundedCornerShape(50)).background(Panel).border(1.dp, Line, RoundedCornerShape(50)).padding(horizontal = 28.dp, vertical = 18.dp)) {
                     when {
                         status is PlaybackStatus.Error -> {
+                            val error = status as PlaybackStatus.Error
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("Fehler beim Abspielen", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                                if (status.message != null) {
+                                if (error.message != null) {
                                     Spacer(Modifier.height(8.dp))
-                                    Text(status.message, fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
+                                    Text(error.message, fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
                                 }
                             }
                         }

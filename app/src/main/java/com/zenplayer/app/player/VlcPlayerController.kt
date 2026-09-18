@@ -29,16 +29,14 @@ class VlcPlayerController(context: Context) : ZenPlayerController {
         mediaPlayer = player
         _status.value = PlaybackStatus.Loading
 
-        player.setEventListener(object : MediaPlayer.Event.Listener {
-            override fun onEvent(event: MediaPlayer.Event) {
-                when (event.type) {
-                    MediaPlayer.Event.Playing -> _status.value = PlaybackStatus.Playing
-                    MediaPlayer.Event.Paused -> _status.value = PlaybackStatus.Paused
-                    MediaPlayer.Event.Stopped -> _status.value = PlaybackStatus.Idle
-                    MediaPlayer.Event.EncounteredError -> _status.value = PlaybackStatus.Error("VLC Error")
-                    MediaPlayer.Event.Buffering -> _status.value = PlaybackStatus.Loading
-                    else -> {}
-                }
+        player.setEventListener(MediaPlayer.EventListener { event ->
+            when (event.type) {
+                MediaPlayer.Event.Playing -> _status.value = PlaybackStatus.Playing
+                MediaPlayer.Event.Paused -> _status.value = PlaybackStatus.Paused
+                MediaPlayer.Event.Stopped -> _status.value = PlaybackStatus.Idle
+                MediaPlayer.Event.EncounteredError -> _status.value = PlaybackStatus.Error("VLC Error")
+                MediaPlayer.Event.Buffering -> _status.value = PlaybackStatus.Loading
+                else -> {}
             }
         })
 
