@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,8 +80,23 @@ fun PlayerScreen(
     val active = state as? PlayerUi.Active
     val channel = active?.channel
 
+    val loadingTimeout = remember { mutableStateOf(false) }
+
     LaunchedEffect(channel?.id) {
+        loadingTimeout.value = false
         channel?.let { controller.play(it.url, it.name, null) }
+    }
+
+    LaunchedEffect(status) {
+        if (status == PlaybackStatus.Loading) {
+            loadingTimeout.value = false
+            kotlinx.coroutines.delay(15000L)
+            if (status == PlaybackStatus.Loading) {
+                loadingTimeout.value = true
+            }
+        } else {
+            loadingTimeout.value = false
+        }
     }
 
     DisposableEffect(engine.playerEngine) {
@@ -132,16 +148,36 @@ fun PlayerScreen(
         }
 
         val loading = status == PlaybackStatus.Loading || status == PlaybackStatus.Idle
-        if (loading || status is PlaybackStatus.Error) {
+        if (loading || status is PlaybackStatus.Error || loadingTimeout.value) {
             Box(Modifier.align(Alignment.Center), contentAlignment = Alignment.Center) {
                 Box(Modifier.clip(RoundedCornerShape(50)).background(Panel).border(1.dp, Line, RoundedCornerShape(50)).padding(horizontal = 28.dp, vertical = 18.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (status is PlaybackStatus.Error) {
-                            Text("Fehler beim Abspielen", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        } else {
-                            CircularProgressIndicator(Modifier.size(34.dp), color = AccentA, strokeWidth = 3.5.dp)
-                            Spacer(Modifier.width(18.dp))
-                            Text("Laedt...", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.85f))
+                    when {
+                        status is PlaybackStatus.Error -> {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Fehler beim Abspielen", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                if (status.message != null) {
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(status.message, fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
+                                }
+                            }
+                        }
+                        loadingTimeout.value -> {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(34.dp), color = AccentA, strokeWidth = 3.5.dp)
+                                Spacer(Modifier.width(18.dp))
+                                Column {
+                                    Text("Lädt zu lange...", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    Spacer(Modifier.height(8.dp))
+                                    Text("Drücke OK zum Retry", fontSize = 12.sp, color = Color.White.copy(alpha = 0.6f))
+                                }
+                            }
+                        }
+                        else -> {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(Modifier.size(34.dp), color = AccentA, strokeWidth = 3.5.dp)
+                                Spacer(Modifier.width(18.dp))
+                                Text("Lädt...", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White.copy(alpha = 0.85f))
+                            }
                         }
                     }
                 }
