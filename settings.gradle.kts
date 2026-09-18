@@ -1,6 +1,10 @@
 pluginManagement {
     repositories {
-        // Try Alibaba mirror first (publicly available, often works in restricted environments)
+        // Gradle Central Plugin Portal (for KSP and other plugins)
+        gradlePluginPortal()
+        // Maven Central (for KSP and other plugins)
+        mavenCentral()
+        // Try Alibaba mirror for Android/Google artifacts
         maven {
             url = uri("https://maven.aliyun.com/repository/google")
             content {
@@ -10,10 +14,6 @@ pluginManagement {
                 includeGroupByRegex("org\\.jetbrains.*")
             }
         }
-        // Gradle Central Plugin Portal
-        gradlePluginPortal()
-        // Maven Central as fallback
-        mavenCentral()
         // Google as fallback if accessible
         google()
     }
@@ -22,7 +22,9 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        // Try Alibaba mirror first
+        // Maven Central (for most open-source dependencies)
+        mavenCentral()
+        // Try Alibaba mirror for Android/Google artifacts
         maven {
             url = uri("https://maven.aliyun.com/repository/google")
             content {
@@ -31,8 +33,6 @@ dependencyResolutionManagement {
                 includeGroupByRegex("androidx.*")
             }
         }
-        // Maven Central
-        mavenCentral()
         // Google as fallback
         google()
     }
