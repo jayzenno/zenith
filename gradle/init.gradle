@@ -1,0 +1,17 @@
+allprojects {
+    repositories {
+        def JCENTER_URL = 'https://jcenter.bintray.com/'
+        def GOOGLE_URL = 'https://dl.google.com/dl/android/maven2/'
+        def MAVEN_CENTRAL = 'https://repo.maven.apache.org/maven2/'
+        
+        maven {
+            url GOOGLE_URL
+            allowInsecureProtocol false
+        }
+        maven {
+            url MAVEN_CENTRAL
+            allowInsecureProtocol false
+        }
+        mavenCentral()
+    }
+}
