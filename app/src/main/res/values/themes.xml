@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.ZenPlayer" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/zen_background</item>
+        <item name="android:colorBackground">@color/zen_background</item>
+        <item name="android:statusBarColor">@color/zen_background</item>
+        <item name="android:navigationBarColor">@color/zen_background</item>
+    </style>
+</resources>

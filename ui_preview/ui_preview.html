@@ -1,0 +1,103 @@
+﻿<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZenPlayer – UI Preview v10</title>
+<link rel="stylesheet" href="z.css">
+</head>
+<body>
+
+<div class="frame" id="frame">
+  <div class="liquid" id="liquidBg">
+    <div class="aurora" id="auroraEl"></div>
+    <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+    <div class="holo" id="holoEl"></div>
+    <div class="noise"></div><div class="vignette"></div>
+  </div>
+
+  <nav class="topnav" id="topnav">
+    <div class="tbrand"><span class="lg">Z</span>ZenPlayer</div>
+    <div class="titem on" data-nav="home">Start</div>
+    <div class="titem" data-nav="epg">TV-Programm</div>
+    <div class="titem" data-nav="vod">Videos</div>
+    <div class="titem" data-nav="music">Musik</div>
+    <div style="flex:1"></div>
+    <div class="titem" data-nav="settings">Einstellungen</div>
+  </nav>
+
+  <nav class="ktv" id="ktv">
+    <div class="ktile on" data-nav="home" tabindex="0"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg>Start</div>
+    <div class="ktile" data-nav="epg" tabindex="0"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4M16 3v4M4 11h16"/></svg>Programm</div>
+    <div class="ktile" data-nav="vod" tabindex="0"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="2"/><path d="M4 10h16M8 6l-1 4M12 6l-1 4M16 6l-1 4"/></svg>Videos</div>
+    <div class="ktile" data-nav="music" tabindex="0"><svg viewBox="0 0 24 24"><path d="M4 18v-6a8 8 0 0 1 16 0v6"/><rect x="3" y="14" width="4" height="7" rx="2"/><rect x="17" y="14" width="4" height="7" rx="2"/></svg>Musik</div>
+    <div class="ktile" data-nav="settings" tabindex="0"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5h.1a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5.1z"/></svg>Setup</div>
+  </nav>
+
+  <aside class="rail" id="rail">
+    <div class="nitem on" data-nav="home" tabindex="0"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg><span class="tip">Start</span></div>
+    <div class="nitem" data-nav="epg" tabindex="0"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="16" rx="3"/><path d="M8 3v4M16 3v4M4 11h16"/></svg><span class="tip">TV-Programm</span></div>
+    <div class="nitem" data-nav="vod" tabindex="0"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="2"/><path d="M4 10h16M8 6l-1 4M12 6l-1 4M16 6l-1 4"/></svg><span class="tip">Videos</span></div>
+    <div class="nitem" data-nav="music" tabindex="0"><svg viewBox="0 0 24 24"><path d="M4 18v-6a8 8 0 0 1 16 0v6"/><rect x="3" y="14" width="4" height="7" rx="2"/><rect x="17" y="14" width="4" height="7" rx="2"/></svg><span class="tip">Musik</span></div>
+    <div class="nitem" data-nav="settings" tabindex="0"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5h.1a1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5.1z"/></svg><span class="tip">Einstellungen</span></div>
+  </aside>
+
+  <div class="workspace">
+    <div class="screen on" id="s-home"><div class="view" id="homeView"><div class="pad" id="homePad"></div></div></div>
+    <div class="screen" id="s-browse"><div class="view" id="browseView"><div class="pad" id="browsePad"></div></div></div>
+    <div class="screen" id="s-epg"><div class="view-fill" id="epgPad"></div></div>
+    <div class="screen" id="s-settings"><div class="view" id="setView"><div class="pad" id="setPad"></div></div></div>
+
+    <div class="screen player" id="s-player">
+      <div class="pvid" id="pvid">
+        <div class="art" id="pvidArt"></div>
+        <div class="lg" id="pvidLg"></div>
+        <div class="pgradt"></div><div class="pgradb"></div>
+      </div>
+      <div class="overlay3" id="pOverlay">
+        <div class="ov-top">
+          <div class="pback" id="pBack" tabindex="0"><svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></div>
+          <div class="phead">
+            <div class="pchiplive">LIVE</div>
+            <b id="pTitle">–</b>
+            <small id="pSub">–</small>
+          </div>
+          <div class="ov-right"><b id="pClock">20:07</b><small id="pQ">4K · ExoPlayer</small></div>
+        </div>
+        <div class="ov-bot">
+          <div class="pnav">
+            <div class="timebar"><span id="pTE">20:00</span><span id="pTR">-12:00</span></div>
+            <div class="progbar" id="progBar"><div class="filled"></div><div class="dot"></div></div>
+          </div>
+          <div class="pmeta">
+            <small>Jetzt</small><b id="pNow">–</b>
+            <span><small class="n2">Als nächstes · </small><span id="pNext">–</span></span>
+            <small id="pDesc" class="pdesc"></small>
+          </div>
+          <div class="ctrls">
+            <button class="cbtn" id="zPrev"><svg viewBox="0 0 24 24"><path d="M19 12L8 5v14z"/><line x1="5" y1="5" x2="5" y2="19"/></svg><span>Zap −</span></button>
+            <button class="cbtn play" id="zPlay">▶</button>
+            <button class="cbtn" id="zNext"><span>Zap +</span><svg viewBox="0 0 24 24"><path d="M5 12l11-7v14z"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+          </div>
+        </div>
+      </div>
+      <div class="zinfo" id="zInfo">
+        <div class="logo lg" id="zLogo"></div>
+        <div style="min-width:0"><div class="zn" id="zNum">3</div><b id="zName">–</b><small id="zProg">–</small></div>
+      </div>
+      <div class="pminhint">▲/▼ Sender · Pause = Pause · OK Menü · Back zurück</div>
+    </div>
+  </div>
+
+  <div class="pip" id="pip">
+    <div class="bg" id="pipBg"></div>
+    <div class="live">VORSCHAU</div>
+    <div class="wm" id="pipWm"></div>
+    <div class="cap"><b id="pipName"></b><small id="pipProg"></small></div>
+  </div>
+</div>
+
+<div class="ctxwrap" id="ctxWrap"><div class="ctx" id="ctxBox"></div></div>
+
+<script src="z.js"></script>
+</body>
+</html>
