@@ -29,27 +29,42 @@ class VlcPlayerController(context: Context) : ZenPlayerController {
         mediaPlayer = player
         _status.value = PlaybackStatus.Loading
 
+        player.setEventListener(object : MediaPlayer.Event.Listener {
+            override fun onEvent(event: MediaPlayer.Event) {
+                when (event.type) {
+                    MediaPlayer.Event.Playing -> _status.value = PlaybackStatus.Playing
+                    MediaPlayer.Event.Paused -> _status.value = PlaybackStatus.Paused
+                    MediaPlayer.Event.Stopped -> _status.value = PlaybackStatus.Idle
+                    MediaPlayer.Event.EncounteredError -> _status.value = PlaybackStatus.Error("VLC Error")
+                    MediaPlayer.Event.Buffering -> _status.value = PlaybackStatus.Loading
+                    else -> {}
+                }
+            }
+        })
+
         val media = Media(libVLC, Uri.parse(uri))
         media.setHWDecoderEnabled(true, false)
         subtitleUrl?.let { media.addOption(":sub-file=${it.replace(" ", "%20")}") }
         player.media = media
+        attachVideoLayout()
         player.play()
-        _status.value = PlaybackStatus.Playing
     }
 
     override fun toggle() {
         val player = mediaPlayer ?: return
-        if (player.isPlaying) player.pause() else player.play()
+        if (player.isPlaying) {
+            player.pause()
+        } else {
+            player.play()
+        }
     }
 
     override fun pause() {
         mediaPlayer?.pause()
-        _status.value = PlaybackStatus.Paused
     }
 
     override fun resume() {
         mediaPlayer?.play()
-        _status.value = PlaybackStatus.Playing
     }
 
     override fun seekBy(deltaMs: Long) {
@@ -57,15 +72,32 @@ class VlcPlayerController(context: Context) : ZenPlayerController {
         player.time = (player.time + deltaMs).coerceAtLeast(0L)
     }
 
-    fun videoLayout(context: Context): View = VLCVideoLayout(context).also { layout ->
-        mediaPlayer?.attachViews(layout, null, false, false)
+    private var videoLayout: VLCVideoLayout? = null
+
+    fun videoLayout(context: Context): View {
+        if (videoLayout == null) {
+            videoLayout = VLCVideoLayout(context)
+        }
+        videoLayout?.let { layout ->
+            mediaPlayer?.attachViews(layout, null, false, false)
+        }
+        return videoLayout!!
+    }
+
+    private fun attachVideoLayout() {
+        val layout = videoLayout
+        val player = mediaPlayer
+        if (layout != null && player != null) {
+            player.attachViews(layout, null, false, false)
+        }
     }
 
     private fun releaseMediaPlayer() {
-        mediaPlayer?.stop()
-        mediaPlayer?.detachViews()
-        mediaPlayer?.release()
+        val player = mediaPlayer
         mediaPlayer = null
+        player?.stop()
+        player?.detachViews()
+        player?.release()
     }
 
     override fun release() {

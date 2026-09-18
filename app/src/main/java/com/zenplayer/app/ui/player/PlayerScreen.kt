@@ -79,8 +79,13 @@ fun PlayerScreen(
     val active = state as? PlayerUi.Active
     val channel = active?.channel
 
-    LaunchedEffect(channel?.id) { channel?.let { controller.play(it.url, it.name, null) } }
-    DisposableEffect(controller) { onDispose { controller.release() } }
+    LaunchedEffect(channel?.id) {
+        channel?.let { controller.play(it.url, it.name, null) }
+    }
+
+    DisposableEffect(engine.playerEngine) {
+        onDispose { controller.release() }
+    }
 
     val upcoming by vm.upcoming(channel?.id.orEmpty()).collectAsStateWithLifecycle(initialValue = emptyList())
 

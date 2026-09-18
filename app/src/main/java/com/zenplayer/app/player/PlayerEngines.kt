@@ -80,12 +80,15 @@ class ExoPlayerController(context: Context) : ZenPlayerController {
 
     override fun pause() {
         player.pause()
-        _status.value = PlaybackStatus.Paused
     }
 
     override fun resume() {
         player.play()
-        _status.value = PlaybackStatus.Loading
+        if (player.playbackState == androidx.media3.common.Player.STATE_READY) {
+            _status.value = PlaybackStatus.Playing
+        } else {
+            _status.value = PlaybackStatus.Loading
+        }
     }
 
     override fun seekBy(deltaMs: Long) {
@@ -93,6 +96,7 @@ class ExoPlayerController(context: Context) : ZenPlayerController {
     }
 
     fun playerView(context: Context): View = PlayerView(context).apply {
+        this.player = this@ExoPlayerController.player
         useController = true
         controllerAutoShow = true
     }
