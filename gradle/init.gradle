@@ -1,17 +1,36 @@
+// Gradle Initialization Script for Zenith Android TV
+// Handles proxy and restricted network environment
+
 allprojects {
     repositories {
-        def MAVEN_CENTRAL = 'https://repo.maven.apache.org/maven2/'
-        def GOOGLE_MIRROR_URL_1 = 'https://maven.aliyun.com/repository/google'
+        // Maven Central - most reliable in restricted environments
+        mavenCentral() {
+            content {
+                excludeGroupByRegex("com\\.android.*")
+                excludeGroupByRegex("com\\.google.*")
+                excludeGroupByRegex("androidx.*")
+            }
+        }
 
-        mavenCentral()
+        // Maven Central as comprehensive fallback
         maven {
-            url GOOGLE_MIRROR_URL_1
-            allowInsecureProtocol false
+            url = uri("https://repo.maven.apache.org/maven2/")
+            allowInsecureProtocol = false
+            content {
+                includeGroupByRegex(".*")
+            }
         }
-        maven {
-            url MAVEN_CENTRAL
-            allowInsecureProtocol false
+
+        // Gradle Plugin Portal
+        gradlePluginPortal()
+
+        // Google as last resort (may fail due to organization proxy policy)
+        try {
+            google() {
+                allowInsecureProtocol = false
+            }
+        } catch (Exception e) {
+            logger.warn("Google Maven repository not accessible: ${e.message}")
         }
-        google()
     }
 }

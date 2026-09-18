@@ -1,0 +1,33 @@
+# Zenith Android TV - Docker Build Container
+# Use this to build APK in an environment with unrestricted internet access
+
+FROM gradle:8.14.5-jdk21-jammy
+
+# Set working directory
+WORKDIR /project
+
+# Install Android SDK (if needed for actual build)
+RUN apt-get update && apt-get install -y \
+    android-sdk \
+    android-sdk-build-tools \
+    android-sdk-platform-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Android SDK path
+ENV ANDROID_SDK_ROOT=/usr/lib/android-sdk
+ENV PATH=$PATH:$ANDROID_SDK_ROOT/tools:$ANDROID_SDK_ROOT/platform-tools
+
+# Copy project files
+COPY . .
+
+# Build the debug APK
+RUN gradle app:assembleDebug --stacktrace
+
+# Output volume for APK
+VOLUME ["/output"]
+
+# Copy APK to output volume
+RUN mkdir -p /output && \
+    cp app/build/outputs/apk/debug/app-debug.apk /output/ || echo "APK build may have failed"
+
+CMD ["bash", "-c", "if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then echo 'Build succeeded!'; else echo 'Build failed'; fi"]
