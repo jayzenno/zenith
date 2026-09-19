@@ -4,6 +4,7 @@ import com.zenplayer.app.data.model.Channel
 import com.zenplayer.app.data.model.EpgProgram as DbEpgProgram
 import com.zenplayer.app.data.model.MediaType
 import com.zenplayer.app.data.settings.recentWatchKey
+import com.zenplayer.app.ui.epg.EPG_START_MIN
 import com.zenplayer.app.ui.epg.displayWindowStart
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -24,9 +25,11 @@ class HomeDataTest {
 
     private fun channels(n: Int): List<Channel> = List(n) { ch("c$it") }
 
-    // Window-relative timestamp helper: minute [m] after the local 05:00 window start
-    // (the same basis mapDbPrograms uses), so fixture times stay valid on any day.
-    private fun ts(m: Int): Long = displayWindowStart(0) + m * 60_000L
+    // Timestamp helper: WALL-CLOCK minute-of-day [m] (the slot basis mapDbPrograms uses,
+    // 300 = 05:00) translated into millis on today's local 05:00–05:00 window, so fixture
+    // times stay valid on any day. Early-morning m < 300 would sit on the NEXT window's
+    // tail — tests for that path build their own day=-1 timestamps explicitly.
+    private fun ts(m: Int): Long = displayWindowStart(0) + (m - EPG_START_MIN) * 60_000L
 
     private fun prog(channelId: String, fromMin: Int, toMin: Int, title: String): DbEpgProgram =
         DbEpgProgram(

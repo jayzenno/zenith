@@ -188,6 +188,33 @@ fun epgNextGroup(
 fun epgGroupCategoryName(id: String): String =
     if (id.startsWith("cat:")) id.substring(4) else id
 
+// ---------------------------------------------------------------------------
+// Guide context menu (Key.C / Long-OK) — honest actions only (masterplan rule #2).
+//
+// Previously the menu advertised "Von Anfang an (Replay)", "Merken",
+// "Aufnahme planen" and "Nur dieser Sender" — none of these had any real
+// implementation (Shared Catchup = Phase B, DVR/Merkliste = Phase E), they only
+// produced a success toast. Fabricated functionality is forbidden in production,
+// so Phase A offers exactly the actions that actually DO something.
+
+/** The context-menu actions that are wired to real functionality in Phase A. */
+val EPG_CTX_REAL_ACTIONS: Set<String> = setOf("play", "fav", "info")
+
+/** A Guide context-menu entry: machine `action` + user-facing `title`. */
+data class CtxItem(val action: String, val title: String)
+
+/**
+ * The real context-menu items for a Guide channel row. Pure and JVM-testable;
+ * the ViewModel adds no extra entries. The favorite entry reflects the actual
+ * favorite state of the row ([isFav]). Every returned action is genuinely
+ * implemented (EPG_CTX_REAL_ACTIONS).
+ */
+fun epgCtxItems(isFav: Boolean): List<CtxItem> = listOf(
+    CtxItem("play", "Wiedergabe"),
+    CtxItem("fav", if (isFav) "Aus Favoriten entfernen" else "Zu Favoriten hinzufügen"),
+    CtxItem("info", "Senderinfo")
+)
+
 /**
  * Horizontal scroll target (in px) that brings the focused programme into view, with a small
  * leading padding. Pure and JVM-testable so the Guide's focus-follow logic is verifiable

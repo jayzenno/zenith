@@ -30,8 +30,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -758,12 +758,11 @@ private fun EpgContextOverlay(vm: EpgViewModel, colors: com.zenplayer.app.ui.the
                         when (item.action) {
                             "play" -> Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = colors.accentStart, modifier = Modifier.size(18.dp))
                             "fav" -> Text("♥", fontSize = 14.sp, color = colors.accentStart)
-                            else -> Icon(Icons.Filled.Settings, contentDescription = null, tint = colors.accentStart, modifier = Modifier.size(16.dp))
+                            else -> Icon(Icons.Filled.Info, contentDescription = null, tint = colors.accentStart, modifier = Modifier.size(16.dp))
                         }
                     }
                     Spacer(Modifier.width(12.dp))
                     Text(item.title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = colors.onSurface, modifier = Modifier.weight(1f))
-                    Text(item.key, fontSize = 9.sp, fontWeight = FontWeight.Black, color = if (selected) colors.accentStart else colors.onSurface.copy(alpha = 0.45f), letterSpacing = 1.sp)
                 }
             }
         }

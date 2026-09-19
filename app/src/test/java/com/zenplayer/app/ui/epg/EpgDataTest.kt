@@ -335,4 +335,37 @@ class EpgDataTest {
         // Category names containing the prefix itself still round-trip.
         assertEquals("cat:news", epgGroupCategoryName("cat:cat:news"))
     }
+
+    // --- Context menu honesty (masterplan rule #2: no fabricated functionality) ---
+
+    @Test
+    fun epgCtxItems_containsOnlyRealActions() {
+        val actions = epgCtxItems(isFav = false).map { it.action }.toSet()
+        // Phase A implements exactly these three; everything else must not appear.
+        assertEquals(EPG_CTX_REAL_ACTIONS, actions)
+        // The former fake-only entries (toast without effect) never come back:
+        // replay = Shared Catchup (Phase B), remind/rec = DVR/Merkliste (Phase E),
+        // foco = channel-focus filter (not implemented).
+        assertTrue(actions.none { it in setOf("replay", "remind", "rec", "foco") })
+    }
+
+    @Test
+    fun epgCtxItems_playAndInfoTitlesAreStable() {
+        val items = epgCtxItems(isFav = false)
+        assertEquals(3, items.size)
+        assertEquals(CtxItem("play", "Wiedergabe"), items[0])
+        assertEquals(CtxItem("info", "Senderinfo"), items[2])
+    }
+
+    @Test
+    fun epgCtxItems_favTitleReflectsFavoriteState() {
+        assertEquals(
+            CtxItem("fav", "Aus Favoriten entfernen"),
+            epgCtxItems(isFav = true)[1]
+        )
+        assertEquals(
+            CtxItem("fav", "Zu Favoriten hinzufügen"),
+            epgCtxItems(isFav = false)[1]
+        )
+    }
 }

@@ -23,8 +23,6 @@ enum class EpgLayer { CHS, GRID, CONTEXT }
 
 enum class EpgMoveDir { LEFT, RIGHT, UP, DOWN }
 
-data class CtxItem(val action: String, val title: String, val key: String)
-
 class EpgViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: StateFlow<ZenSettings> = container.settings.settingsFlow
@@ -371,20 +369,7 @@ class EpgViewModel(private val container: AppContainer) : ViewModel() {
         layer = EpgLayer.CONTEXT
     }
 
-    fun ctxItems(vi: Int): List<CtxItem> {
-        val p = epgProgramsFor(vi, day()).getOrNull(ecol)
-        val replay = p != null && p.s <= nowMin && p.e > nowMin
-        val items = mutableListOf(
-            CtxItem("play", "Wiedergabe", "OK"),
-            CtxItem("fav", if (isFav(vi)) "Aus Favoriten entfernen" else "Zu Favoriten hinzufügen", "♥")
-        )
-        if (replay) items.add(CtxItem("replay", "Von Anfang an (Replay)", "ENTF"))
-        items.add(CtxItem("remind", "Merken", "M"))
-        items.add(CtxItem("info", "Senderinfo", "I"))
-        items.add(CtxItem("rec", "Aufnahme planen", "R"))
-        if (vi > 0) items.add(CtxItem("foco", "Nur dieser Sender", "ESC"))
-        return items
-    }
+    fun ctxItems(vi: Int): List<CtxItem> = epgCtxItems(isFav(vi))
 
     fun ctxMove(dir: EpgMoveDir) {
         val items = ctxItems(currentVis().getOrNull(row) ?: 0)
@@ -400,17 +385,10 @@ class EpgViewModel(private val container: AppContainer) : ViewModel() {
         when (action) {
             "play" -> playChannel(vi)
             "fav" -> toggleFav(vi)
-            "replay" -> toast("Replay ab Sendungsbeginn gestartet")
-            "remind" -> toast("Zur Merkliste hinzugefügt")
             "info" -> {
                 val p = epgProgramsFor(vi, day()).getOrNull(ecol)
-                toast(EPG_CHANNELS[vi].name + " · Kanal " + EPG_CHANNELS[vi].num + " · " + (p?.t ?: "–"))
+                toast(programChannelLabel(vi) + " · " + (p?.t ?: "–"))
             }
-            "rec" -> {
-                val p = epgProgramsFor(vi, day()).getOrNull(ecol)
-                toast("Aufnahme um " + (if (p != null) hh(p.s) else "–") + " Uhr geplant")
-            }
-            "foco" -> toast("Fokus auf " + EPG_CHANNELS[vi].name)
         }
     }
 

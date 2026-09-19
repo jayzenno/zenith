@@ -60,7 +60,11 @@ fun homeNowPrograms(
         val ch = channels[vi]
         val epgId = ch.extra?.takeIf { it.isNotBlank() } ?: ch.id
         val progs = byEpgId[epgId] ?: return@mapNotNull null
-        val slot = mapDbPrograms(progs, day).lastOrNull { it.s <= nowSlot }
+        // The running programme = the one that started last at or before now. maxByOrNull on
+        // the slot basis is order-invariant (a Room ORDER BY can't be relied on here): it
+        // matches epgProgAt's "last programme with s <= now" for the Guide, independently of
+        // the input list order.
+        val slot = mapDbPrograms(progs, day).filter { it.s <= nowSlot }.maxByOrNull { it.s }
         if (slot == null) null else vi to slot
     }.toMap()
 }

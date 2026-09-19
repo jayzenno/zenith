@@ -1391,3 +1391,155 @@ Schreibzeitpunkt noch aktiv und hat weder meine fünf Dateien überschrieben noc
 bereits umgehängt. **Es wurde keine destruktive Aktion unternommen**; der Zustand ist als
 gemeinsames Review-Volumen an Claude weitergereicht. Eine frische Gesamt-Verifikation kann
 erst nach Abschluss der Parallel-Session sinnvoll laufen (Gradle-Lock / build-Verzeichnis).
+
+---
+
+## Runde Fortsetzung: Home ← EpgRepository-Direktbindung vervollständigt — Gesamtstand frisch grün
+
+`MODUS=core-tv`, Fortsetzung der unterbrochenen Parallel-Session (deren Stand wurde inzwischen
+durch den Checkpoint `298e589` committet). Die im Handoff als „nächster sinnvoller Schritt“
+(Q#2 aus „Home→Repository-Bindung“) markierte Bindung ist jetzt **produktiv umgesetzt und
+frisch verifiziert** — zusammen mit allen Dateien der Parallel-Session im kumulierten Tree.
+
+### Umsetzung (Code)
+1. **`data/db/Daos.kt`** — `observeForWindow(dayStart, dayEnd): Flow<List<EpgProgramEntity>>`
+   (reaktive Variante von `getForWindow`, gleiche WHERE/ORDER-BY). Room invalidiert den Flow
+   automatisch bei jedem `upsertAll` → Home aktualisiert sich live nach EPG-Sync.
+2. **`data/repo/EpgRepository.kt`** — `programsForWindowFlow(day)` über
+   `displayWindowStart/End` (KEST/DST-sichere 05:00–05:00-Fenster), `toModel`-Mapping.
+3. **`ui/home/HomeData.kt`** — pure `homeNowPrograms(dbPrograms, channels, day, now)`:
+   Gruppiert Room-Programme nach `channelId`, ordnet pro Kanal-Index über die exakt zu
+   `EpgViewModel.refreshPrograms` identische EPG-Identität (`extra ?: id`) zu, mappt auf
+   Wanduhr-Slots (`mapDbPrograms(progs, day)`, Tag ± effectiveDay für die 00:00–04:59-Phase)
+   und wählt das **zuletzt gestartete** Programm (`s <= now`, reichenfolgeninvariant via
+   `maxByOrNull { s }` — konsistent zu `epgProgAt`, aber unabhängig von einer Room-ORDER-BY).
+   Kanäle ohne gespeicherte Programme erhalten **keinen** Eintrag (Regel #2, kein
+   Erfinden); `day`/`now` sind Parameter (JVM-testbar, Defaults wie im Guide).
+4. **`ui/home/HomeScreen.kt`** — sammelt `programsForWindowFlow(effectiveDay(0, now))` via
+   `collectAsStateWithLifecycle`, berechnet `nowProgs: Map<Int, EpgProgram>` und ersetzt
+   **alle vier** `nowProg(vi, …)`-Aufrufe (Hub-Hero, FavCard, LiveTile, KanalHome) durch
+   `nowProgs[vi]`. Damit ist Home vollständig von Room gespeist — ohne vorherigen
+   Guide-Besuch.
+5. **Bedarfsgesteuerter EPG-Sync:** `LaunchedEffect` mit Schlüssel
+   `dbPrograms.isEmpty() && channels.isNotEmpty()` ruft die echten Provider-Syncs
+   (`iptvRepo.providers().forEach { syncEpg(it) }`) auf, sobald das heutige Fenster leer ist.
+   Re-Emit der Room-Flows beendet den Effekt automatisch → User, die den Guide schon besucht
+   haben, lösen keinen Doppel-Sync aus.
+6. **`test/.../HomeDataTest.kt`** — +9 sterile JVM-Tests (Klasse 10 → 19): leere Fälle,
+   laufendes Programm nach Stream-Id, `extra`-Identität, fehlende Identität ausgeschlossen,
+   zuletzt gestartetes Programm (Ordnung invariant), Future-Programme übersprungen,
+   Kanal-Mix, frühmorgendliches Programm im Vortagfenster (Tag −1, Tail-Slots).
+
+### Verifikation (SnapShot ~15:11, kumuliert mit 298e589 + meinen 2 Korrekturen)
+```
+JAVA_HOME='C:\Program Files\Java\jdk-21.0.12.1' cmd.exe /c gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline --rerun-tasks
+BUILD SUCCESSFUL in 30 s, 45 Tasks executed
+```
+**78 JVM-Unit-Tests, 0 Failures/Errors** (XMLs frisch gelesen): `EpgDataTest` **26**/26,
+`HomeDataTest` **19**/19, `ChannelQualityTest` 10, `RecentWatchTest` 9, `FallbackPolicyTest`
+4, `PlaybackStatusTest` 4, `PlayerDiagnosticsTest` 6. `git diff --check` sauber.
+Kein Commit/Push/Reset (uncommittet: meine beiden abschließenden Korrekturen in
+`HomeData.kt`, `HomeDataTest.kt`).
+**⚠ WICHTIG:** Die Parallel-Implementer-Session (PID 22222) läuft danach **weiter** und hat
+nach diesem Build zusätzlich EpgData.kt/EpgScreen.kt/EpgViewModel.kt/EpgDataTest.kt
+geschrieben (mtimes 15:13–15:14, Richtung: Guide-Kontextmenü nur echte Aktionen). Dieser
+Build ist daher ein **SnapShot** des Standes ~15:11, NICHT die Gesamtverifikation des
+heutigen kumulierten Trees.
+
+### Eigener Fehler, der im Lauf gefunden wurde
+Mein erster Testlauf ließ 4 `homeNowPrograms`-Tests scheitern: (a) `lastOrNull` hing an der
+Eingabereihenfolge (Room-ORDER-BY nicht garantieren), ersetzt durch `maxByOrNull`-Auswahl;
+(b) Test-Fixture `ts()` zählte Minuten relativ zum 05:00-Fensterstart statt Wanduhr-Minuten
+seit Mitternacht (Slot-Basis von `mapDbPrograms`). Beides korrigiert; der zweite Lauf war
+grün. Der erste Fehler war ein echter Purtheits-/Determinismus-Mangel, kein reines Testproblem.
+
+### Gate-Bezug
+- „Real provider/XMLTV/Xtream EPG is displayed“ auf **Home** (nicht nur Guide): Home zeigt
+  echte Programme direkt ab dem Moment, in dem Room sie enthält — unabhängig vom Guide.
+- Der frühere Zustand (Home zeigte „Keine Programmdaten“, bis der Guide einmal geöffnet
+  wurde) ist behoben; der Sync hängt nicht mehr am `EpgViewModel.init` allein.
+- „Current time is correct“ bleibt im 24-h-Zyklus korrekt — auch hier über `effectiveDay`
+  + `wallClockToSlot`, konsistent zur Guide-Slot-Basis der Parallel-Session.
+
+### Nicht verifiziert (kein Gerät/`adb`)
+- Reale Home-/Guide-Darstellung, D-Pad und Wiedergabe auf TV-Hardware weiterhin nicht
+  getestet; `BUILD SUCCESSFUL != echte Wiedergabe verifiziert` gilt unverändert.
+- Der bedarfsgesteuerte Sync-Pfad ist nur Code-zweigig geprüft (kein echter Provider/Netz).
+
+### Risiken / offen
+- `HomeScreen` berechnet `now` je Recomposition (`nowMin()`, kein Ticker): Die „Jetzt“-
+  Auswahl aktualisiert sich bei Daten-/Recompose-Änderungen, nicht minutengenau
+  (identisches Verhalten wie bisher im Guide).
+- Guide-Kontextmenü-Aktionen Phase B (Replay/Merken/Aufnahme) — die **parallel laufende
+  Session** entfernt diese Fake-Aktionen gerade (nur `play/fav/info` bleiben) und schreibt
+  dafür in EpgData/EpgViewModel/EpgScreen; dieser Stand ist von mir noch nicht gebaut
+  (Frisch-Build nach deren Abschluss nötig).
+- `CORE_TV_ACCEPTED` bleibt Claude-Verdikt; Review-Basis: committeter Stand `298e589`
+  (inkl. Home-Bindung + Parallel-Stand 15:08) + meine 2 uncommitteten Korrekturen + die
+  laufenden Parallel-Änderungen nach 15:11.
+
+---
+
+## Runde: Guide-Kontextmenü ehrlich gemacht — Fake-Aktionen entfernt (Regel #2)
+
+`MODUS=core-tv`, nach Abschluss der Home-←-EpgRepository-Bindung. Genau EIN geschlossenes
+Vorhaben: der im letzten Command-Handoff als Regel-#2-Folgepunkt markierte Komplex „Kontextmenü
+zeigt Aktionen ohne Funktion“.
+
+### Befund (Code-belegt)
+- Guide-Kontextmenü (C-Taste / Long-OK auf Senderzeile) bot acht Aktionen: `play`, `fav`,
+  `info` (echt) sowie `replay` („Von Anfang an (Replay)“), `remind` („Merken“), `rec`
+  („Aufnahme planen“), `foco` („Nur dieser Sender“) — alle vier mit **ausschließlich einem
+  Erfolgs-Toast**, ohne jede Wirkung (Shared Catchup = Phase B, Merkliste/DVR = Phase E,
+  Sender-Fokus-Filter nie implementiert). Das ist fabrizierte Funktionalität (Regel #2).
+- Jede Zeile trug außerdem einen **Shortcut-Hint** (`OK`,`♥`,`ENTF`,`M`,`I`,`R`,`ESC`), der
+  technisch nicht verdrahtet war (nur `C` öffnet, Pfeile navigieren, Enter/OK löst aus,
+  Back/Esc schließt).
+
+### Umsetzung
+1. `EpgData.kt`: `data class CtxItem(val action: String, val title: String)` (Feld `key`
+   entfernt) + `val EPG_CTX_REAL_ACTIONS: Set<String> = setOf("play", "fav", "info")` +
+   pure `fun epgCtxItems(isFav: Boolean): List<CtxItem>` → Wiedergabe / Favoriten-Toggle
+   (Titel je nach echtem Zustand) / Senderinfo.
+2. `EpgViewModel.kt`: lokale `CtxItem`-Deklaration entfernt; `ctxItems(vi)` delegiert an
+   `epgCtxItems(isFav(vi))`; `ctxAct` kennt nur noch `play`/`fav`/`info` — die vier
+   Fake-Zweige inkl. Toasts (`replay`, `remind`, `rec`, `foco`, jeweils separat berechnet in
+   `ctxItems`) sind gelöscht. „info“-Toast nutzt jetzt die vorhandene pure
+   `programChannelLabel(vi)` statt des Inline-Duplikats (gleiche Ausgabe, zudem safe bei
+   leerem Kanalstore).
+3. `EpgScreen.kt`: Fake-Shortcut-Spalte (`Text(item.key, …)`) aus `EpgContextOverlay`
+   entfernt; Icon-Fallback für „info“ von `Icons.Filled.Settings` →
+   `Icons.Filled.Info` (zur Aktion passend), zugehörigen Import umgestellt.
+4. `EpgDataTest.kt` (+3): `epgCtxItems_containsOnlyRealActions` (Set == `EPG_CTX_REAL_ACTIONS`,
+   explizit keins von replay/remind/rec/foco), `epgCtxItems_playAndInfoTitlesAreStable`,
+   `epgCtxItems_favTitleReflectsFavoriteState`.
+
+### Verifikation (frisch, kumulierter Tree — beide Runden)
+```
+JAVA_HOME='C:\Program Files\Java\jdk-21.0.12.1' cmd.exe /c gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline --rerun-tasks
+BUILD SUCCESSFUL in 29s, 45 Tasks executed
+```
+**81 JVM-Unit-Tests, 0 Failures/Errors** (XMLs frisch, 15:15): `EpgDataTest` 29/29,
+`HomeDataTest` 19/19, `ChannelQualityTest` 10, `RecentWatchTest` 9, `FallbackPolicyTest` 4,
+`PlaybackStatusTest` 4, `PlayerDiagnosticsTest` 6. `git diff --check` sauber.
+Kein Commit/Push/Reset; `.kotlin`-Session-Artefakt nach dem Build wiederhergestellt
+(Working Tree ohne verwaiste Löschung).
+
+### Gate-Bezug
+- Regel #2 („keine erfundenen Funktionen/Inhalte“) im Guide-Kontextmenü abgehakt: keine
+  Aktion ohne echte Implementierung, keine toten Shortcut-Hints, keine Erfolgs-Toasts ohne
+  Effekt. Der Aktionsraum für spätere Phasen ist jetzt explizit (`EPG_CTX_REAL_ACTIONS`) und
+  testgeschützt — Replay/Catch-up und DVR kehren als reale Aktionen zurück, nicht als Platzhalter.
+
+### Nicht verifiziert (kein Gerät/`adb`)
+- Reale Guide-/Kontextmenü-Bedienung auf TV-Hardware weiterhin nicht getestet;
+  `BUILD SUCCESSFUL != echte Wiedergabe verifiziert` gilt unverändert.
+
+### Risiken / offen
+- `ui_preview/ui_preview.html` (Designreferenz) zeigt ggf. noch die alte Menü-Optik mit
+  Shortcut-Spalte — nur Referenz, kein Produktionscode.
+- Nutzer sehen „Replay“/„Merken“/„Aufnahme planen“ jetzt nicht mehr — bewusst (Phase B/E);
+  Wiedereinführung via `epgCtxItems`/`EPG_CTX_REAL_ACTIONS`.
+- `CORE_TV_ACCEPTED` bleibt Claude-Verdikt; Review-Basis = Checkpoint `298e589` + die
+  uncommitteten Dateien beider Runden (HomeData.kt/HomeDataTest.kt,
+  EpgData/EpgViewModel/EpgScreen/EpgDataTest, Doku).

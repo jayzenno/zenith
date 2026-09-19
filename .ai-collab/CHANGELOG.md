@@ -1,5 +1,47 @@
 # AI Collaboration Changelog
 
+## 2026-09-19 — Guide-Kontextmenü ehrlich gemacht: Fake-Aktionen entfernt (Regel #2)
+- Befund: Guide-Kontextmenü (C-Taste/Long-OK) bot acht Aktionen; nur `play`/`fav`/`info`
+  hatten echte Wirkung. „Von Anfang an (Replay)“, „Merken“, „Aufnahme planen“, „Nur dieser
+  Sender“ zeigten nur Erfolgs-Toasts ohne Funktion (Phase B/E, nie implementiert) — plus
+  Fake-Shortcut-Hints (`♥`/`M`/`I`/`R`/`ENTF`/`ESC`) pro Zeile, die nie verdrahtet waren.
+- Fix: `CtxItem` (ohne `key`) + `EPG_CTX_REAL_ACTIONS` + pure JVM-testbare
+  `epgCtxItems(isFav)` in `EpgData.kt`; `EpgViewModel.ctxItems` delegiert daran, `ctxAct`
+  kennt nur noch play/fav/info (Fake-Zweige + Toasts gelöscht, „info“ nutzt
+  `programChannelLabel`); `EpgScreen`-Overlay ohne Shortcut-Spalte, Info-Icon statt Settings.
+- +3 JVM-Tests (EpgDataTest 26 → 29): Nur-echte-Aktionen, stabile Titel, Favoriten-Status.
+- **Gesamt-Build frisch grün über den kumulierten Tree (Home-Bindung + diese Runde):**
+  `BUILD SUCCESSFUL in 29 s` (45 Tasks, offline, `--rerun-tasks`), **81 JVM-Tests, 0
+  Failures/Errors** (XMLs frisch, 15:15): EpgDataTest **29**, HomeDataTest **19**,
+  ChannelQuality 10, RecentWatch 9, FallbackPolicy 4, PlaybackStatus 4, PlayerDiagnostics 6.
+  `git diff --check` sauber. Kein Commit/Push/Reset; `CORE_TV_ACCEPTED` bleibt Claude-Verdikt.
+- Parallel-Session (PID 22222) mit dieser Runde **abgeschlossen** — kein laufender Stand
+  mehr; der frühere „Snapshot ~15:11“-Vorbehalt ist damit überholt.
+
+## 2026-09-19 — Home ← EpgRepository-Direktbindung vervollständigt + verifiziert (Stand ~15:11)
+- Die Parallel-Session (14:52) wurde fortgeführt: Home lädt „Jetzt LIVE“/Hero/Favoriten/
+  KanalHome jetzt direkt aus Room (`EpgRepository.programsForWindowFlow`) statt aus dem
+  Guide-In-Memory-`EpgStore`. Pure, JVM-testbare `homeNowPrograms(dbPrograms, channels, day, now)`
+  gruppiert nach EPG-Identität (`extra ?: id`, identisch zu `refreshPrograms`), mappt via
+  `mapDbPrograms` auf Wanduhr-Slots und wählt das **zuletzt gestartete** Programm mit
+  `s <= now` — reihenfolgeinvariant (`maxByOrNull`), konsistent zu `epgProgAt`.
+- Erster Testerlauf deckte einen Logikfehler meiner eigenen Funktion (Reihenfolgeabhängiges
+  `lastOrNull`) und falsche Test-Fixtures (`ts()` zählte Fenster-min statt Wanduhr-min) auf;
+  beides korrigiert. 4 fehlgeschlagene Tests → 0.
+- **Bedarfsgesteuerter einmaliger EPG-Sync:** `HomeScreen` stößt via `LaunchedEffect`
+  (Schlüssel = Fenster-leer ∧ Kanäle vorhanden) die echten Provider-Syncs an, damit echte
+  Daten ohne vorherigen Guide-Besuch ankommen — kein doppelter Sync nach Guide-Besuch.
+- Gateway-Review-Punkt des Handoffs (#2 aus Runde „Home→Repository-Bindung“) damit
+  produktiv umgesetzt; Guide-Verhalten unverändert (nutzt weiter `EpgStore`).
+- **SnapShot-Build grün (Stand ~15:11, kumuliert mit 298e589 + meinen 2 Korrekturen):**
+  `BUILD SUCCESSFUL in 30 s` (45 Tasks, offline, `--rerun-tasks`), **78 JVM-Tests, 0
+  Failures/Errors** (XMLs frisch): EpgDataTest **26**, HomeDataTest **19**, ChannelQuality 10,
+  RecentWatch 9, FallbackPolicy 4, PlaybackStatus 4, PlayerDiagnostics 6.
+  `git diff --check` sauber. Kein Commit/Push/Reset; `CORE_TV_ACCEPTED` bleibt Claude-Verdikt.
+- **⚠ Nachtrag:** Die Parallel-Session läuft danach **weiter** und schreibt in
+  EpgData/EpgScreen/EpgViewModel/EpgDataTest (Guide-Kontextmenü-Ehrlichkeit, mtimes
+  15:13–15:14, nicht von mir gebaut). Gesamtverifikation erst nach deren Abschluss sinnvoll.
+
 ## 2026-09-19 — ⚠ Parallele Implementer-Session im selben Working Tree (Home←EpgRepository-Bindung)
 - Eine zweite `opencode run --agent implementer`-Session (PID 22402, 14:52) schrieb während
   dieser Runde zusätzliche uncommittete Dateien: `Daos.kt` (`observeForWindow`), `EpgRepository.kt`
