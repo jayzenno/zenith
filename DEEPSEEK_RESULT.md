@@ -122,6 +122,84 @@ BUILD SUCCESSFUL
 - Nur der Player ist an die Designsprache angepasst; übrige Screens unverändert.
 - Kein Timeshift/Recording.
 
+## Verifikationsrunde (kein Code-Change)
+
+Durchlauf ohne neuen Auftrag: `TO_DEEPSEEK.md` enthielt nur „Warte auf den nächsten
+Claude-Review“ und keinen konkreten neuen Befund. Stattdessen wurde der aktuelle Stand
+gegen den Bericht geprüft:
+
+- Working Tree sauber (`git status`), kein Diff, Branch `claude/charming-fermi-jhbd3i`.
+- `:app:assembleDebug` und `:app:testDebugUnitTest --offline` erneut ausgeführt:
+  `BUILD SUCCESSFUL`. Tests per `--rerun-tasks` real ausgeführt:
+  `FallbackPolicyTest` 4/4, `PlayerDiagnosticsTest` 6/6, 0 Failures/Errors (10 Tests).
+- Code-Abgleich mit dem Bericht bestätigt: `ZenPlayerSession` mit
+  `resolvedUserAgent` (`PlayerDefaults.USER_AGENT`), `START_TIMEOUT_MS = 12_000`,
+  `FallbackPolicy` (Einmal-Fallback), `PlayerDiagnostics` (sanitize), VLC-Event-Mapping.
+- Settings besitzen bereits einen `user_agent`-Key (`SettingsRepository`), ein
+  UI-Feld existiert wie dokumentiert noch nicht (bewusst offen).
+
+**Ergebnis: kein Code-Change in dieser Runde.** Offene Punkte aus „Noch offen“
+(User-Agent-UI-Feld, übrige Screens, Timeshift/Recording) sind bewusst bzw. außerhalb
+des Player-Fokus zurückgestellt.
+
+## Zweite Verifikationsrunde (erneut kein Code-Change)
+
+Wiederholter Durchlauf ohne neuen Auftrag: `TO_DEEPSEEK.md` war weiterhin nur der
+Platzhalter „Warte auf den nächsten Claude-Review“, kein neuer Befund von Claude.
+Stand erneut verifiziert:
+
+- Branch `claude/charming-fermi-jhbd3i`; Working Tree enthält nur die (uncommitteten)
+  Handoff-Dokumente der Vorrunde, **keinen** Quellcode-Diff.
+- `gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline --rerun-tasks` via
+  Windows-JVM erneut ausgeführt: `BUILD SUCCESSFUL` in 29 s, 45 Tasks.
+- Test-XMLs gelesen: `FallbackPolicyTest` 4/4, `PlayerDiagnosticsTest` 6/6, 0 Failures
+  (10 Tests) — deckungsgleich mit dem Bericht.
+- Code-Abgleich: `ZenPlayerSession.resolvedUserAgent` (`PlayerDefaults.USER_AGENT`),
+  `START_TIMEOUT_MS = 12_000`, Einmal-Fallback (`FallbackPolicy`), VLC-Event-Mapping,
+  `SettingsRepository.Keys.USER_AGENT` ohne UI-Feld — unverändert.
+- Kein Gerät/Stream verfügbar (kein `adb`, keine reale Wiedergabe) — Lücke aus
+  „Nicht getestet“ bleibt bestehen.
+
+**Ergebnis: kein Code-Change, keine neuen offenen Punkte.** Der Bericht bleibt gültig.
+
+## Dritte Verifikationsrunde (erneut kein Code-Change)
+
+Wiederholter Durchlauf auf Anweisung des Orchestrators; `TO_DEEPSEEK.md` enthielt
+weiterhin nur den Platzhalter „Warte auf den nächsten Claude-Review“, keinen neuen
+Befund von Claude. Stand erneut verifiziert:
+
+- Branch `claude/charming-fermi-jhbd3i`; Working Tree ohne Quellcode-Diff — uncommitted
+  sind nur die Handoff-Dokumente (`.ai-collab/*`, `DEEPSEEK_RESULT.md`).
+- Build über Windows-JVM (`cmd.exe /c gradlew.bat :app:assembleDebug :app:testDebugUnitTest
+  --offline --rerun-tasks`): `BUILD SUCCESSFUL` in 28 s, 45 Tasks (davon 45 executed).
+- Test-XMLs gelesen: `FallbackPolicyTest` 4/4, `PlayerDiagnosticsTest` 6/6, 0 Failures,
+  0 Errors (10 Tests) — deckungsgleich mit dem Bericht.
+- Code-Abgleich (alle Kern-Dateien frisch gelesen):
+  - `ZenPlayerSession.kt`: `resolvedUserAgent` (`PlayerDefaults.USER_AGENT`-Fallback),
+    `START_TIMEOUT_MS = 12_000`, Watchdog mit `first { Playing|Ready|Error|Ended }`,
+    `retry()` ohne neue Listener/Player, `bind()` cancelt vorigen Collector.
+  - `FallbackPolicy.kt`: Einmal-Fallback, kein Ping-Pong, `primaryFailed` merkt Primär-
+    Fehler sessionweit.
+  - `PlayerDiagnostics.kt`/`PlayerDefaults.kt`: `sanitizeMessage`/`hostOf` ohne
+    Credentials, zentrale Defaults (UA, 15 s Connect, 20 s Read, 12 s Start-Timeout).
+  - `PlayerEngines.kt` (`ExoPlayerController`): `DefaultHttpDataSource.Factory` mit
+    `setAllowCrossProtocolRedirects(true)`, Timeouts, UA; `useController=false` —
+    PlayerView ohne eingebaute Controls (kein Mobile-Look, kein Focus-Klau);
+    `STATE_IDLE`-Mapping auf `Loading`/`Idle`; `hasStarted` trennt Loading/Buffering.
+  - `VlcPlayerController.kt`: State nur aus Events (`Playing`, `EndReached`,
+    `EncounteredError`, `Buffering` mit `buffering >= 100 && hasStarted`).
+  - `SettingsRepository.kt`: `Keys.USER_AGENT = "user_agent"` vorhanden, bewusst
+    weiterhin ohne UI-Feld.
+- Manifest geprüft: `INTERNET`-Permission, `usesCleartextTraffic="true"` — HTTP-IPTV
+  bleibt grundsätzlich erlaubt.
+- Kein Gerät/Stream verfügbar (`adb` nicht im PATH) — echte Wiedergabe weiterhin nicht
+  verifiziert.
+
+**Ergebnis: kein Code-Change, keine neuen offenen Punkte.** Der Bericht bleibt gültig;
+`BUILD SUCCESSFUL != echte Wiedergabe verifiziert` gilt unverändert.
+
+---
+
 ## Bekannte Einschränkungen
 
 - Der Start-Timeout für den Fallback beträgt 12 s (`PlayerDefaults.START_TIMEOUT_MS`). Ein
