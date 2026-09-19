@@ -14,3 +14,4 @@ app/build
 .ai-collab/LAST_SESSION
 .ai-collab/marathon-logs/
 .ai-collab/MARATHON_RUNNING
+zenith-marathon.out
