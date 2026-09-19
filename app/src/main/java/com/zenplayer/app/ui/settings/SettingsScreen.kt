@@ -1,5 +1,7 @@
 package com.zenplayer.app.ui.settings
 
+import com.zenplayer.app.player.PlayerDefaults
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -245,6 +247,18 @@ private fun PlaybackTab(settings: ZenSettings, vm: SettingsViewModel, colors: co
             ChoiceBtn("HD", settings.preferHd, colors) { vm.setPreferHd(true) }
             ChoiceBtn("Beste verfuegbar", !settings.preferHd, colors) { vm.setPreferHd(false) }
         }
+    }
+    Spacer(Modifier.height(14.dp))
+    Panel("HTTP-User-Agent", colors) {
+        var value by remember(settings.userAgent) { mutableStateOf(settings.userAgent.orEmpty()) }
+        ZenTextField("User-Agent (leer = Standard)", value, colors) { value = it }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "Manche IPTV-Anbieter blockieren Streams mit falschem oder standardmaessigem User-Agent. Leer lassen, um '${PlayerDefaults.USER_AGENT}' zu verwenden.",
+            fontSize = 11.sp, color = colors.onSurface.copy(alpha = 0.55f)
+        )
+        Spacer(Modifier.height(12.dp))
+        ChoiceBtn("Uebernehmen", false, colors) { vm.setUserAgent(value.trim().ifBlank { null }) }
     }
 }
 
