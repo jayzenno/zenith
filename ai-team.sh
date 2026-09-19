@@ -2,12 +2,12 @@
 set -uo pipefail
 
 MODE="${1:-improve}"
-MAX_ROUNDS="${2:-3}"
+MAX_ROUNDS="${2:-0}"
 ROUND=1
 ENABLE_CODEX="${ENABLE_CODEX:-0}"
 
 [[ "$MODE" == "fix" || "$MODE" == "improve" ]] || { echo "Usage: ./ai-team.sh [fix|improve] [max_rounds]"; exit 1; }
-[[ "$MAX_ROUNDS" =~ ^[1-9][0-9]*$ ]] || { echo "max_rounds muss positiv sein."; exit 1; }
+[[ "$MAX_ROUNDS" =~ ^[0-9]+$ ]] || { echo "max_rounds muss 0 (unbegrenzt) oder eine positive Zahl sein."; exit 1; }
 
 if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "ABBRUCH: Working Tree ist nicht sauber. Erst committen/sichern."
@@ -114,8 +114,8 @@ finish_current_task_with_fallback() {
 echo "Zenith AI Team | mode=$MODE | max=$MAX_ROUNDS | start=$START_COMMIT"
 echo "Quota-Fallback aktiv. Codex wird nach Einrichtung separat aktiviert."
 
-while [ "$ROUND" -le "$MAX_ROUNDS" ]; do
-  echo "========== RUNDE $ROUND / $MAX_ROUNDS =========="
+while [[ "$MAX_ROUNDS" -eq 0 || "$ROUND" -le "$MAX_ROUNDS" ]]; do
+  if [[ "$MAX_ROUNDS" -eq 0 ]]; then echo "========== RUNDE $ROUND / unbegrenzt =========="; else echo "========== RUNDE $ROUND / $MAX_ROUNDS =========="; fi
 
   DEEP_PROMPT="Du bist Zeniths primärer Implementierer. Lies AGENTS.md, STATE/CONTEXT/Handoffs und DEEPSEEK_RESULT.md, prüfe git diff und Code. $MISSION
 MODUS=$MODE. Im fix-Modus löse die konkrete Übergabe. Im improve-Modus löse zuerst offene Handoffs und wähle danach höchstens EINEN klar abgegrenzten nächsten Verbesserungsschritt nach Priorität. Implementiere, teste/build soweit passend, aktualisiere DEEPSEEK_RESULT.md, TO_CLAUDE.md und CHANGELOG.md und setze ACTIVE_AGENT=CLAUDE."
