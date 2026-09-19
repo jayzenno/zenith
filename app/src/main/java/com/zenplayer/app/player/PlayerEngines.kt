@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import android.view.View
 import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +38,7 @@ class ExoPlayerController(context: Context) : ZenPlayerController {
     override val status: StateFlow<PlaybackStatus> = _status.asStateFlow()
 
     val player: ExoPlayer = ExoPlayer.Builder(context)
+        .setRenderersFactory(DefaultRenderersFactory(context).setEnableDecoderFallback(true))
         .setHandleAudioBecomingNoisy(true)
         .build()
 
