@@ -5,7 +5,6 @@ import com.zenplayer.app.player.PlayerDefaults
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -337,9 +336,8 @@ private fun ChoiceBtn(label: String, selected: Boolean, colors: com.zenplayer.ap
             .background(if (selected) Color.White.copy(alpha = 0.12f) else Color.Transparent)
             .border(1.dp, if (selected) Color.White.copy(alpha = 0.25f) else line, RoundedCornerShape(50))
             .zenFocusEffect(focused, focusEffect, RoundedCornerShape(50))
-            .clickable(onClick = onClick)
-            .focusable()
             .onFocusChanged { focused = it.isFocused && it.hasFocus }
+            .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp)
     ) { Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (selected) colors.onSurface else colors.onSurface.copy(alpha = 0.55f)) }
 }
@@ -368,9 +366,8 @@ private fun SmallBtn(label: String, colors: com.zenplayer.app.ui.theme.ZenColors
             .background(Color.White.copy(alpha = 0.08f))
             .border(1.dp, line, RoundedCornerShape(50))
             .zenFocusEffect(focused, focusEffect, RoundedCornerShape(50))
-            .clickable(onClick = onClick)
-            .focusable()
-            .onFocusChanged { focused = it.isFocused && it.hasFocus },
+            .onFocusChanged { focused = it.isFocused && it.hasFocus }
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) { Text(label, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = colors.onSurface) }
 }
