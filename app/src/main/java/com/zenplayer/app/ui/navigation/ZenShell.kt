@@ -55,7 +55,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
-import androidx.navigation.compose.rememberNavController
 import com.zenplayer.app.data.settings.ZenSettings
 import com.zenplayer.app.di.AppContainer
 import com.zenplayer.app.ui.components.zenFocusEffect
@@ -76,50 +75,58 @@ private val NavItems = listOf(
 fun ZenShell(
     settings: ZenSettings,
     container: AppContainer,
+    navController: NavHostController,
     content: @Composable (NavHostController) -> Unit
 ) {
-    val navController = rememberNavController()
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route ?: "home"
     val navStyle = LocalNavStyle.current
     val colors = LocalZenColors.current
 
+    // The player is an immersive, full-screen surface: no navigation chrome, no padding and
+    // no animated background layer burning GPU cycles behind the video.
+    val immersivePlayer = currentRoute.startsWith("player")
+
     Box(Modifier.fillMaxSize().background(colors.background)) {
-        ZenBackground(settings, Modifier.fillMaxSize())
-        when (navStyle) {
-            "top" -> {
-                TopNav(currentRoute) { route ->
-                    navigateTo(navController, route, currentRoute)
+        if (immersivePlayer) {
+            content(navController)
+        } else {
+            ZenBackground(settings, Modifier.fillMaxSize())
+            when (navStyle) {
+                "top" -> {
+                    TopNav(currentRoute) { route ->
+                        navigateTo(navController, route, currentRoute)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(top = 76.dp)
+                    ) {
+                        ScaledContent(settings, currentRoute) { content(navController) }
+                    }
                 }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = 76.dp)
-                ) {
-                    ScaledContent(settings, currentRoute) { content(navController) }
+                "tiles" -> {
+                    TileNav(currentRoute) { route ->
+                        navigateTo(navController, route, currentRoute)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(start = 200.dp)
+                    ) {
+                        ScaledContent(settings, currentRoute) { content(navController) }
+                    }
                 }
-            }
-            "tiles" -> {
-                TileNav(currentRoute) { route ->
-                    navigateTo(navController, route, currentRoute)
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(start = 200.dp)
-                ) {
-                    ScaledContent(settings, currentRoute) { content(navController) }
-                }
-            }
-            else -> {
-                RailNav(currentRoute) { route ->
-                    navigateTo(navController, route, currentRoute)
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(start = 92.dp)
-                ) {
-                    ScaledContent(settings, currentRoute) { content(navController) }
+                else -> {
+                    RailNav(currentRoute) { route ->
+                        navigateTo(navController, route, currentRoute)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(start = 92.dp)
+                    ) {
+                        ScaledContent(settings, currentRoute) { content(navController) }
+                    }
                 }
             }
         }

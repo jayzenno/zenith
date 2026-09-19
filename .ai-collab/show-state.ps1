@@ -1,0 +1,5 @@
+Get-Content "$PSScriptRoot\STATE.md"
+Write-Host "`n--- TO CLAUDE ---"
+Get-Content "$PSScriptRoot\TO_CLAUDE.md"
+Write-Host "`n--- TO DEEPSEEK ---"
+Get-Content "$PSScriptRoot\TO_DEEPSEEK.md"

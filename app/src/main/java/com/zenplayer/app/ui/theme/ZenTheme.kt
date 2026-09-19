@@ -123,6 +123,7 @@ fun buildZenColors(preset: ZenPreset, customAccentArgb: Long?): ZenColors {
 @Composable
 fun ZenTheme(
     settings: ZenSettings,
+    showBackdrop: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val preset = ThemePresets.byId(settings.themePresetId)
@@ -175,7 +176,9 @@ fun ZenTheme(
                     .fillMaxSize()
                     .background(colors.background)
             ) {
-                LiquidBackdrop(Modifier.fillMaxSize())
+                if (showBackdrop) {
+                    LiquidBackdrop(Modifier.fillMaxSize())
+                }
                 content()
             }
         }
