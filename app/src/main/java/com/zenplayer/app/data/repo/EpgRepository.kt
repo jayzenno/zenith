@@ -14,13 +14,13 @@ class EpgRepository(private val dao: EpgDao) {
 
     suspend fun programsForDay(channelId: String, day: Int): List<EpgProgram> {
         val start = com.zenplayer.app.ui.epg.displayWindowStart(day)
-        val end = start + (com.zenplayer.app.ui.epg.EPG_END_MIN - com.zenplayer.app.ui.epg.EPG_START_MIN) * 60_000L
+        val end = com.zenplayer.app.ui.epg.displayWindowEnd(day)
         return dao.getForChannelAndWindow(channelId, start, end).map { it.toModel() }
     }
 
     suspend fun programsForWindow(day: Int): List<EpgProgram> {
         val start = com.zenplayer.app.ui.epg.displayWindowStart(day)
-        val end = start + (com.zenplayer.app.ui.epg.EPG_END_MIN - com.zenplayer.app.ui.epg.EPG_START_MIN) * 60_000L
+        val end = com.zenplayer.app.ui.epg.displayWindowEnd(day)
         return dao.getForWindow(start, end).map { it.toModel() }
     }
 

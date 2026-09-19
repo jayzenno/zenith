@@ -4,6 +4,12 @@ import com.zenplayer.app.data.model.Channel
 import com.zenplayer.app.data.model.EpgProgram as DbEpgProgram
 import com.zenplayer.app.data.model.MediaType
 import java.util.Calendar
+import java.util.TimeZone
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -43,6 +49,17 @@ class EpgDataTest {
     }
 
     @Test
+    fun updateChannels_clearsIndexBoundPrograms_beforeChannelListIsReplaced() {
+        EpgStore.clear()
+        EpgStore.setPrograms(0, 0, listOf(EpgProgram(s = 300, e = 360, t = "Sender A", c = "")))
+
+        // Index 0 may point to a different provider channel after a playlist re-sync.
+        EpgStore.updateChannels(listOf(EpgChannel("Sender B", "SB", 0L, 1L, 1)))
+
+        assertTrue(epgProgramsFor(0, 0).isEmpty())
+    }
+
+    @Test
     fun displayWindowStart_is5amLocalMidnight() {
         val start = displayWindowStart(0)
         val cal = Calendar.getInstance().apply { timeInMillis = start }
@@ -50,13 +67,21 @@ class EpgDataTest {
         assertEquals(0, cal.get(Calendar.MINUTE))
 
         val start1 = displayWindowStart(1)
-        assertEquals(start + 24 * 60 * 60_000L, start1)
+        val next = Calendar.getInstance().apply { timeInMillis = start1 }
+        assertEquals(5, next.get(Calendar.HOUR_OF_DAY))
+        assertEquals(0, next.get(Calendar.MINUTE))
+        cal.add(Calendar.DAY_OF_YEAR, 1)
+        assertEquals(cal.get(Calendar.DAY_OF_YEAR), next.get(Calendar.DAY_OF_YEAR))
     }
 
     @Test
-    fun mapDbPrograms_mapsWindowRelativeMinutes() {
+    fun mapDbPrograms_mapsWallClockMinutesSinceMidnight() {
+        // DB window starts at 05:00 (displayWindowStart); a programme that really airs at
+        // 12:00 sits 7 h later. Slot minutes are WALL-CLOCK minutes since midnight, so the
+        // mapping must add EPG_START_MIN (300) — otherwise 12:00 would map to s=420 and the
+        // grid would render every programme five hours too early.
         val start = displayWindowStart(0)
-        val noonStart = start + 12 * 60 * 60_000L
+        val noonStart = start + 7 * 60 * 60_000L
         val noonEnd = noonStart + 60 * 60_000L
         val db = listOf(
             DbEpgProgram("p1", "ch1", 1L, noonStart, noonEnd, "Mittagsmagazin", "beschreibung")
@@ -66,6 +91,66 @@ class EpgDataTest {
         assertEquals(12 * 60, mapped[0].s) // 12:00 → 720
         assertEquals(13 * 60, mapped[0].e) // 13:00 → 780
         assertEquals("Mittagsmagazin", mapped[0].t)
+    }
+
+    @Test
+    fun mapDbPrograms_slotBasisAlignsWithHeaderAndNowLine() {
+        // Grid invariants: column h shows hour (h + 5) % 24 and the now-line sits at
+        // (nowMin - EPG_START). Slot s must use the SAME basis so the now-column matches.
+        // 05:00 → s=300 → column 0 → header hour 05:00 (arrows: (0+5)%24).
+        // 12:00 → s=720 → column (720-300)/60 = 7 → header (7+5)%24 = 12:00.
+        val start = displayWindowStart(0)
+        val prog5 = DbEpgProgram("p1", "ch1", 1L, start, start + 60 * 60_000L, "Früh", null)
+        val prog12 = DbEpgProgram("p2", "ch1", 1L, start + 7 * 60 * 60_000L, start + 8 * 60 * 60_000L, "Mittag", null)
+        val mapped = mapDbPrograms(listOf(prog5, prog12), 0)
+
+        assertEquals(EPG_START_MIN, mapped[0].s)         // 05:00 → left edge of the grid
+        assertEquals(12 * 60, mapped[1].s)               // 12:00 → column 7, header "12:00"
+        assertEquals(13 * 60, mapped[1].e)               // 13:00 → column 8, header "13:00"
+        // hh(s) must print the real wall-clock start time on the programme card.
+        assertEquals("05:00", hh(mapped[0].s))
+        assertEquals("12:00", hh(mapped[1].s))
+        assertEquals("13:00", hh(mapped[1].e))
+    }
+
+    @Test
+    fun mapDbPrograms_keepsWallClockSlotsAcrossSpringDstTransition() {
+        val originalZone = TimeZone.getDefault()
+        val zone = ZoneId.of("Europe/Berlin")
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone(zone.id))
+            val springTransition = generateSequence(zone.rules.nextTransition(Instant.now())) {
+                zone.rules.nextTransition(it.instant.plusSeconds(1))
+            }.first { it.offsetAfter.totalSeconds > it.offsetBefore.totalSeconds }
+            val transitionDay = springTransition.dateTimeBefore.toLocalDate()
+            val day = ChronoUnit.DAYS.between(LocalDate.now(zone), transitionDay.minusDays(1)).toInt()
+            val beforeFive = LocalDateTime.of(transitionDay, java.time.LocalTime.of(4, 30))
+                .atZone(zone).toInstant().toEpochMilli()
+            val mapped = mapDbPrograms(
+                listOf(DbEpgProgram("p1", "ch1", 1L, beforeFive, displayWindowEnd(day), "Früh", null)),
+                day
+            )
+
+            // 04:30 on the following local day is the final half-hour of the 05:00–05:00
+            // grid, even though spring DST made its elapsed distance from [start] 23 h 30 m.
+            assertEquals(1710, mapped.single().s)
+            assertEquals(EPG_END_MIN, mapped.single().e)
+        } finally {
+            TimeZone.setDefault(originalZone)
+        }
+    }
+
+    @Test
+    fun nowProg_selectsProgramRunningAtGivenNow() {
+        EpgStore.clear()
+        // Real programme airing 12:00–13:00 (slot s=720, e=780).
+        EpgStore.setPrograms(0, 0, listOf(EpgProgram(s = 720, e = 780, t = "Mittagsmagazin", c = "live")))
+
+        // At 12:30 (nowMin = 750) the running programme is the noon one — the slot basis is
+        // wall-clock minutes, so s=720 matches nowMin=750 exactly as the player overlay
+        // (startTs <= now && endTs > now) would.
+        val prog = nowProg(0, 0, 750)
+        assertEquals("Mittagsmagazin", prog?.t)
     }
 
     @Test

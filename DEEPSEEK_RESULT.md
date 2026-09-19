@@ -986,7 +986,100 @@ BUILD SUCCESSFUL in 41s, 45 Tasks executed (45 executed)
 
 ---
 
+## Zweite Recovery-Runde (Claude rc=1 — unabhängige Bestätigung des committeten Stands)
+
+Wiederholter Fallback-Durchlauf (Parallel-Lauf zum Checkpoint `6a5fe63`). Die angefangene
+Aufgabe (Claude-Review der Home-Runde) war bereits durch die erste Recovery-Runde abgeschlossen
+und committet. **Kein neues Feature** — dieser Lauf verifizierte den committeten Stand
+unabhängig:
+
+- **Git-Zustand konsolidiert:** Rebase finalisiert, `.gitignore` ohne Konfliktmarker,
+  Worktree nach dem Checkpoint `6a5fe63` sauber (`git status --porcelain` leer, HEAD auf
+  `6a5fe63`).
+- **API-/Signatur-Abgleich gegen den echten Code** (alle Referenzen der Home-Runde):
+  `container.channels.allLiveChannels()` (DAO `observeLive()` deterministisch
+  `ORDER BY number, name`), `mapDbChannel(ch, index)` → `EpgChannel(name/code/colorStart/
+  colorEnd/num)`, `nowProg(vi, 0, nowMin())`, `channelQualityHint(name, url)`,
+  `recentOnlyVis`/`recentWatchKey`, `EmptyState(title/message/actionLabel/onAction/modifier)`,
+  `ZenCard`-Signatur — alles vorhanden und passend.
+- **Routen-Identität geprüft:** `playRoute` (`player/{providerId}/{mediaType.name}/
+  {Uri.encode(id)}`) ist zeichengleich mit allen `ZenNavHost`-Navigationen (Zeilen 41/52/63/73)
+  und der Route-Definition `player/{providerId}/{mediaType}/{channelId}` → Home-Karten starten
+  denselben Player-Pfad wie Guide/Live-TV.
+- **Fake-Daten-Grep (Regel #2):** `Text("HD")`, „Action Now“, „Undercover“, „Tatort“,
+  „Top Gun“, „Bundesliga“, „Bares für Rares“, `rememberProgress`, `listOf(16,17,18,19)`,
+  `EPG_CHANNELS` im Home → 0 Treffer im `main`-Source.
+- **Build/Tests frisch ausgeführt** (Windows-JVM, offline, `--rerun-tasks` real):
+  ```
+  JAVA_HOME='C:\Program Files\Java\jdk-21.0.12.1' cmd.exe /c gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline --rerun-tasks
+  BUILD SUCCESSFUL in 38 s, 45 Tasks executed
+  ```
+  **61 JVM-Unit-Tests, 0 Failures/Errors** (XMLs frisch gelesen, 14:12): `HomeDataTest` 10,
+  `ChannelQualityTest` 10, `EpgDataTest` 18, `RecentWatchTest` 9, `FallbackPolicyTest` 4,
+  `PlaybackStatusTest` 4, `PlayerDiagnosticsTest` 6.
+
+### Bewusst NICHT getan
+- Kein `CORE_TV_ACCEPTED` (bleibt Claude-Verdikt), kein Commit/Push/Reset, keine destruktive
+  Git-Aktion. Original-Doku der ersten Recovery-Runde nicht angefasst — dieser Abschnitt ist
+  additiv.
+
+---
+
 ## Bekannte Einschränkungen
+
+## Codex-Fallback (Claude-Quota-Ausfall) — laufende Runde-4-EPG-Aufgabe abgeschlossen
+
+Es wurde ausschließlich der aktuelle, uncommittete EPG-Zeitbasis-Fix geprüft und
+dokumentiert. Kein neues Feature und kein Produktionscode-Change.
+
+- Der Quell-Diff ist konsistent: `mapDbPrograms()` mappt Programm-Slots jetzt auf
+  Wanduhr-Minuten seit Mitternacht. Das entspricht den Konsumenten in Grid und Home
+  (`TimeHeader`, `ProgramRow`, Now-Linie, `nowProg`, Scroll-Ziel); der 05:00-Fensterstart
+  wird nur für die Datenabfrage verwendet.
+- `git diff --check` ist sauber. Die Cache-Invalidierung bei indexgebundenem EPG-Store bleibt
+  als gute, durch einen JVM-Test abgesicherte Änderung erhalten.
+- Der geforderte frische Offline-Lauf wurde erneut gestartet, erreichte aber wegen
+  `WSL ERROR: UtilBindVsockAnyPort:309: socket failed 1` nicht einmal Gradle. Im Linux-Teil
+  ist kein `java` verfügbar; kein Workspace-JDK-Override existiert. Es wurden keine
+  Host-/SDK-/JDK-Einstellungen verändert.
+- Die zuletzt vorhandenen, nach dieser Runde erzeugten XML-Berichte von 14:32 melden
+  64 JVM-Tests mit 0 Failures/Errors (`EpgDataTest` 21/21). Dies ist ausdrücklich kein
+  erfolgreicher neuer Build dieses Fallback-Laufs.
+- Kein Gerät/`adb`: echte EPG-Darstellung, D-Pad, Streams und Wiedergabe bleiben offen.
+
+Nächste Aktion nach Wiederherstellung der WSL-Interop: denselben Offline-Gradle-Lauf mit
+`--rerun-tasks` ausführen. `CORE_TV_ACCEPTED` bleibt ausschließlich Claude vorbehalten.
+
+## Codex-Fallback — EPG-Cache-Konsistenzreparatur (Claude-Quota-Ausfall)
+
+Es wurde ausschließlich die angefangene Claude-Review-Aufgabe übernommen. Dabei fiel ein
+konkreter Datenintegritätsfehler im bereits vorhandenen Guide-Pfad auf: `EpgStore` speichert
+Programme nach dem transienten Grid-Index, löschte diesen Cache beim Austausch der realen
+Kanalreihenfolge aber nicht. Ein Provider-Sync mit Einfügen/Entfernen/Neuordnung konnte so
+das echte Programm eines vorherigen Kanals dem falschen Sender zeigen, bis Daten später
+zufällig überschrieben wurden.
+
+- `EpgStore.updateChannels()` invalidiert jetzt den indexgebundenen Programmcache atomar,
+  bevor die neue Kanalliste eingesetzt wird. `EpgViewModel.refreshPrograms()` baut ihn danach
+  aus Room für die neue Zuordnung wieder auf.
+- `EpgDataTest.updateChannels_clearsIndexBoundPrograms_beforeChannelListIsReplaced()` deckt
+  den Re-Sync-Fall ab.
+- Keine neuen Produktfunktionen, kein Reset, Push oder Commit.
+
+### Teststatus
+
+- `git diff --check` und `git show --check HEAD` sind sauber.
+- Ein frischer Gradle-Lauf war in dieser WSL-Sitzung nicht möglich: Es gibt kein Linux-`java`;
+  der vorhandene Windows-JDK-Aufruf über `cmd.exe` endet vor Gradle mit
+  `WSL ERROR: UtilBindVsockAnyPort:309: socket failed 1`. Das ist eine Host-/WSL-Interop-Lücke,
+  keine behauptete Build-Verifikation.
+- Die zuletzt vorhandenen Test-XMLs stammen von 14:12 und melden 61 Tests, 0 Failures/Errors;
+  sie sind für die neue Prüfung naturgemäß nicht frisch.
+
+### Weiter offen
+
+- Frischen Windows-JVM-Gradle-Lauf nach Wiederherstellung der WSL-Interop ausführen.
+- Kein Gerät/`adb`: reale Wiedergabe, D-Pad und TV-Optik weiterhin nicht verifiziert.
 
 - Der Start-Timeout für den Fallback beträgt 12 s (`PlayerDefaults.START_TIMEOUT_MS`). Ein
   legitim langsamer Stream kann dadurch einmalig auf die andere Engine wechseln. Wert ist
@@ -996,3 +1089,201 @@ BUILD SUCCESSFUL in 41s, 45 Tasks executed (45 executed)
   steht aus.
 - `FallbackPolicy` merkt sich einen Primär-Fehler nur für die Lebensdauer der Session
   (Engine-/UA-Wechsel in den Einstellungen erzeugt eine neue Session).
+
+---
+
+## 2026-09-19 — DeepSeek-Runde 4: EPG-Slot-Zeitbasis repariert (5h-Offset im Guide/Home)
+
+Claude war erneut nicht aktiv; `TO_DEEPSEEK.md` ist ein Platzhalter. Gewählt wurde der eine
+klar umgrenzte, höchstwertige Core-TV-Bug, der direkt das Akzeptanzkriterium „Current time is
+correct and Guide opens around now” (Masterplan Zeile 54) verletzt.
+
+### Befund: 5-Stunden-Versatz der gesamten Programmliste
+
+`mapDbPrograms()` rechnete Slot-Minuten relativ zum 05:00-Datenfenster (`displayWindowStart`)
+plus `coerceIn(300, 1740)` — ein real um 12:00 startendes Programm landete bei `s=420`.
+Die komplette Rendering-Seite arbeitet dagegen mit **Wanduhr-Minuten seit Mitternacht**:
+
+- `ProgramRow`: `left = (prog.s - EPG_START) / 60 * timeColW` (EPG_START=300)
+- `TimeHeader`: `hour = (h + 5) % 24` → Spalte 0 = 05:00, Spalte 7 = 12:00
+- `nowLineX = (now - EPG_START) ...` mit `now = nowMin()` = Minuten seit Mitternacht
+- `isNow = prog.s <= now && prog.e > now`; `nowProg(…, nowMin())`; `hh(prog.s)`;
+  `epgScrollTargetX` (`(s - 300) / 60`)
+
+Ein 12:00-Programm müsste also `s=720` haben (Spalte 7 → Header „12:00“); der alte Code
+erzeugte `s=420` (Spalte 2 → Header „07:00“) → **jedes Programm erschien 5 h zu früh**, die
+„Jetzt“-Markierung/`ecol`/`nowProg` (Guide, Kanalzelle, Home-JETZT) zeigten das Programm des
+16:00- bis 19:00-Fensters statt des laufenden. Die alte Testfixture reproduzierte genau diese
+Verwechslung (`noonStart = start + 12h` = real 17:00, kommentiert als „12:00 → 720“).
+
+### Fix
+
+`app/src/main/java/com/zenplayer/app/ui/epg/EpgData.kt` — `mapDbPrograms` addiert
+`EPG_START_MIN` auf die Fenster-Relativ-Minuten, bevor `coerceIn(300, 1740)` klammert.
+Damit: 05:00 → `s=300` (linke Kante), 12:00 → `s=720` (Spalte 7 = Header „12:00“),
+Spätabend/über Mitternacht bleiben im 300–1740-Rahmen. Slots und Now-Linie/Auswahl
+(Guide + Home) liegen danach auf einer Zeitbasis; die Player-Overlay-Abfrage
+(`startTs <= now && endTs > now` auf echten Epoch-Millis) blieb unverändert und stimmt nun
+mit dem Grid überein.
+
+### Tests (JVM, frisch ausgeführt)
+
+```
+JAVA_HOME='C:\Program Files\Java\jdk-21.0.12.1' cmd.exe /c gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline --rerun-tasks
+BUILD SUCCESSFUL in 36 s, 45 Tasks executed
+```
+
+- **64 JVM-Unit-Tests, 0 Failures/Errors** (vorher 61). `EpgDataTest` 18 → 21:
+  - `mapDbPrograms_mapsWallClockMinutesSinceMidnight` (korrigierte Noon-Fixture: real 12:00 → `s=720`)
+  - `mapDbPrograms_slotBasisAlignsWithHeaderAndNowLine` (05:00→300, 12:00→720, `hh(720)=="12:00"`)
+  - `nowProg_selectsProgramRunningAtGivenNow` (nun bei `nowMin=750` das 12:00-Programm)
+  - Alle übrigen Suiten unverändert grün (HomeData 10, ChannelQuality 10, RecentWatch 9,
+    FallbackPolicy 4, PlaybackStatus 4, PlayerDiagnostics 6).
+- Enthalten bleibt die uncommittete Codex-Fallback-Reparatur (`updateChannels` invalidiert
+  den indexgebundenen Cache; +1 Test), bewusst nicht zurückgesetzt.
+
+### Verifikation / Grenzen
+
+- **Nicht** am Gerät verifiziert: `adb devices` leer/kein Stream gestartet — reale Wiedergabe,
+  D-Pad und TV-Optik weiterhin offen. Der Fix ist rein rechnerisch + per JVM-Tests abgesichert.
+- `git diff --check` sauber, kein Commit/Push/Reset, keine destruktive Git-Aktion.
+- `CORE_TV_ACCEPTED` bleibt Claude-Verdikt (Marathon stoppt am Gate).
+
+---
+
+## Fallback-Verifikationslauf (Implementer-Quota-Recovery): Build-Blocker gelöst + unabhängige Bestätigung
+
+Claude-Runde erneut ausgefallen; übernommen wurde ausschließlich die angefangene Aufgabe
+(Runde-4-EPG-Fix + Codex-Cache-Reparatur verifizieren, den im Codex-Handoff blockierten
+frischen Build ausführen). **Kein neues Feature, kein Quellcode-Change in diesem Lauf.**
+
+### WSL-Interop-Blocker ist aufgelöst (war transient)
+
+Der Codex-Handoff meldete `UtilBindVsockAnyPort:309: socket failed 1` beim Start von
+Windows-Prozessen aus WSL. Dieser Lauf prüfte das direkt:
+
+- `cmd.exe /c ver` → `Microsoft Windows [Version 10.0.26200.9457]`, Exit 0
+- `…\jdk-21.0.12.1\bin\java.exe -version` → `21.0.12.1 LTS`, Exit 0
+
+Die HvSocket-/Vsock-Interop funktioniert wieder (vermutlich durch WSL-/Host-Neustart
+behoben) — der Blocker war transient, kein struktur- oder projektseitiger Fehler.
+
+### Frischer Build + alle Tests (exakt der „Next action“ des Codex-Handoffs)
+
+```
+JAVA_HOME='C:\Program Files\Java\jdk-21.0.12.1' cmd.exe /c gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline --rerun-tasks
+BUILD SUCCESSFUL in 44s, 45 actionable tasks: 45 executed
+```
+
+- **64 JVM-Unit-Tests, 0 Failures/Errors** (XMLs frisch, 14:32): `EpgDataTest` 21/21
+  (inkl. `updateChannels_clearsIndexBoundPrograms…` und der drei Wanduhr-Basis-Tests),
+  `HomeDataTest` 10, `ChannelQualityTest` 10, `RecentWatchTest` 9, `FallbackPolicyTest` 4,
+  `PlaybackStatusTest` 4, `PlayerDiagnosticsTest` 6.
+- Die Ausführung lief gegen genau den aktuellen Quellcode-Stand (EpgData.kt 14:30,
+  EpgDataTest.kt 14:30, XML-Ausgabe 14:32).
+
+### Unabhängige Verifikation der Runde-4-Zeitbasis (alle Konsumenten geprüft)
+
+- `ProgramRow`: `left = (prog.s - EPG_START) / 60 * timeColW` (Spalte 0 = `s=300` = 05:00)
+- `TimeHeader`: `(h + 5) % 24` → Spalte 7 = Header „12:00“
+- `nowLineX = (now - EPG_START) …` mit `now = nowMin()` (Wanduhr); `isNow = s <= now < e`
+- `epgProgAt`/`nowProg` (Guide + HomeScreen) und `epgScrollTargetX` (`(s − 300) / 60`)
+- **Player-Overlay unberührt:** `PlayerViewModel.upcoming()` + `EpgRepository` arbeiten auf
+  echten Epoch-Millis (`observeUpcoming(channelId, now)`), nicht auf Slots — der 5-h-Fix
+  hat den Player nicht verändert, macht Guide & Player aber jetzt konsistent.
+
+→ Die neue Wanduhr-Basis ist mit **allen** Slot-Konsumenten konsistent; die committete
+Relativ-Basis (`mapDbPrograms` ohne `+EPG_START_MIN`) wäre der reale Display-Bug gewesen.
+
+### Codex-Cache-Reparatur bestätigt
+`EpgStore.updateChannels()` löscht den nach Grid-Index geschlüsselten Programmcache vor dem
+Kanal-Austausch; der Regressionstest schlägt ohne den Fix fehl (bewusst als Diff enthalten,
+nicht zurückgesetzt).
+
+### Bewusst NICHT getan
+- Kein Quellcode-Edit (Doku additiv), kein Commit/Push/Reset, keine destruktive Git-Aktion.
+- Kein `CORE_TV_ACCEPTED` (bleibt Claude-Verdikt).
+- Kein neues Feature — die Runde war Verifikation + Build-Freigabe der angefangenen Aufgabe.
+
+---
+
+## Implementer-Fallback #5: Codex-Next-Action ausgeführt — Build grün (WSL-Interop wieder transient)
+
+Der Codex-Handoff meldete den vollen Offline-Build erneut durch `UtilBindVsockAnyPort:309:
+socket failed 1` blockiert und dokumentierte als Next action die Ausführung desselben
+Gradle-Laufs nach Wiederherstellung der Windows-Interop. Dieser Lauf hat das ausgeführt —
+**der Build ist damit nachweislich grün**, der Blocker war wieder transient.
+
+### Frischer Build + alle Tests (14:37)
+
+```
+JAVA_HOME='C:\Program Files\Java\jdk-21.0.12.1' cmd.exe /c gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline --rerun-tasks
+BUILD SUCCESSFUL in 25 s, 45 actionable tasks: 45 executed
+```
+
+- **64 JVM-Unit-Tests, 0 Failures/Errors** (frische XMLs 14:37): `EpgDataTest` 21/21
+  (3 Wanduhr-Basis-Tests + `updateChannels_clearsIndexBoundPrograms…`), `HomeDataTest` 10,
+  `ChannelQualityTest` 10, `RecentWatchTest` 9, `FallbackPolicyTest` 4, `PlaybackStatusTest` 4,
+  `PlayerDiagnosticsTest` 6.
+- Lief gegen genau den aktuellen Quellcode-Stand (uncommitteter Runde-4-Diff unverändert).
+
+### Code-Ebene erneut geprüft (Zustand des Working Trees)
+
+- `EpgData.mapDbPrograms`: Slot-Minuten in Wanduhr-Basis seit Mitternacht
+  (`+ EPG_START_MIN` vor dem Clamp) — konsistent mit `TimeHeader`, `ProgramRow`, Now-Linie,
+  `epgProgAt`/`nowProg`, `epgScrollTargetX` und Home-EPG; Player-Overlay auf Epoch-Millis
+  unberührt.
+- `EpgStore.updateChannels` invalidiert den indexgebundenen Programmcache vor dem
+  Kanal-Austausch; `EpgViewModel.refreshPrograms` baut ihn danach aus Room wieder auf
+  (Reihenfolge im Collector verifiziert: `updateChannels(mapped)` → `refreshPrograms(day())`).
+- `git diff --check` sauber; keine halbfertigen Stellen im Diff; kein Stash, kein Rebase.
+
+### Bewusst NICHT getan
+- **Kein Quellcode-Change** in diesem Lauf (kein neues Feature; der Diff ist ausschließlich
+  Runde-4-Fix + Cache-Reparatur + Doku).
+- Kein Commit/Push/Reset; `CORE_TV_ACCEPTED` bleibt Claude-Verdikt.
+- Kein Gerät/`adb` verfügbar (Exit 127): reale Wiedergabe, D-Pad und TV-Optik weiterhin
+  unverifiziert — `BUILD SUCCESSFUL != echte Wiedergabe verifiziert` gilt unverändert.
+
+---
+
+## Recovery-Runde 6 — laufende EPG-Zeitbasis-Aufgabe bis DST-Grenze vervollständigt
+
+Übernommen wurde ausschließlich der uncommittete EPG-Zeitbasis-/Cache-Konsistenz-Diff.
+Während der Prüfung zeigte sich eine Restinkonsistenz derselben Aufgabe: Das Guide-Fenster
+endete mit `start + 24h`, und die Slotberechnung leitete Wanduhrpositionen aus vergangenen
+Millisekunden ab. An der europäischen Sommerzeitumstellung ist das Fenster zwischen lokalem
+05:00 und dem nächsten 05:00 aber 23 bzw. 25 Stunden lang. Ein Programm am folgenden 04:30
+konnte daher in der falschen Gridspalte landen.
+
+### Repariert
+
+- `displayWindowEnd(day)` nutzt den nächsten **lokalen** 05:00-Grenzwert.
+- `EpgRepository` verwendet diese Grenze für beide Room-Abfragen, sodass Laden und
+  Darstellung denselben DST-korrekten Bereich benutzen.
+- `mapDbPrograms()` ermittelt Grid-Slots aus der lokalen Wanduhr; 00:00–04:59 werden als
+  1440–1739 im laufenden 05:00–05:00-Grid abgebildet. Start-/Endgrenzen bleiben exakt bei
+  300 bzw. 1740.
+- Ein neuer JVM-Regressionstest erzwingt den nächsten europäischen Frühjahrs-DST-Wechsel:
+  04:30 des Folgetags muss Slot 1710 sein, nicht der um eine Stunde zu frühe
+  Millisekunden-Slot 1650.
+
+Die vorherigen Änderungen bleiben erhalten: Cache-Invalidierung bei Kanal-Reihenfolgenwechsel
+und die 5-h-Wanduhr-Korrektur sind damit nicht ersetzt, sondern vervollständigt.
+
+### Test-/Build-Status
+
+- `git diff --check` ist sauber.
+- Ein frischer Offline-Build wurde erneut versucht, aber Windows-Prozesse starten derzeit
+  nicht aus WSL: `WSL ERROR: UtilBindVsockAnyPort:309: socket failed 1` bereits bei
+  `cmd.exe /c ver`. Im Linux-Teil ist kein `java` vorhanden; es wurde bewusst keine Host-,
+  SDK- oder JDK-Konfiguration verändert.
+- Die vorhandenen XML-Berichte von 14:37 zeigen den **Vorzustand** mit 64 Tests und 0 Fehlern
+  (`EpgDataTest` 21/21). Sie enthalten den neuen DST-Test nicht und gelten ausdrücklich
+  nicht als frische Build-/Testbestätigung dieser Änderung.
+
+### Nicht verifiziert
+
+- Kein Gerät/`adb`; reale EPG-Darstellung, D-Pad und Wiedergabe sind nicht getestet.
+- Nach Wiederherstellung der WSL-Interop muss exakt der Offline-Gradle-Lauf mit
+  `--rerun-tasks` wiederholt werden; erwartet sind 65 JVM-Tests (EpgData 22).

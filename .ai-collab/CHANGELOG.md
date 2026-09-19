@@ -1,5 +1,82 @@
 # AI Collaboration Changelog
 
+## 2026-09-19 — Recovery-Runde 6: laufende EPG-Zeitbasis DST-korrekt abgeschlossen
+- Ausschließlich den angefangenen EPG-Zeitbasis-/Cache-Diff übernommen und dessen
+  DST-Inkonsistenz repariert: lokale 05:00–05:00-Fenster statt `+24h`, lokale
+  Wanduhr-Slots statt Millisekunden-Differenzen.
+- Room-Abfragen und Grid-Mapping teilen damit dieselbe Grenze; neuer JVM-Test für den
+  nächsten europäischen Frühjahrs-DST-Wechsel (04:30 -> Slot 1710).
+- `git diff --check` sauber. Frischer Gradle-Lauf hostseitig vor Gradle blockiert
+  (`UtilBindVsockAnyPort`); vorhandene 64 grüne Tests sind Vorzustand, nicht neu behauptet.
+
+## 2026-09-19 — Implementer-Fallback #5: Codex-Build-Blocker final aufgelöst, Runde-4-Stand erneut frisch verifiziert
+- Claude weiter ausgefallen; übernommen wurde ausschließlich die laufende Runde-4-Aufgabe
+  (EPG-5h-Zeitbasis-Fix + Codex-Cache-Invalidierung). Kein neues Feature, kein Quellcode-Change.
+- Der im Codex-Handoff erneut gemeldete WSL-Interop-Blocker (`UtilBindVsockAnyPort`) war
+  wieder transient: voller Offline-Build exakt wie dokumentiert jetzt erfolgreich:
+  `BUILD SUCCESSFUL in 25 s, 45 Tasks executed` (14:37).
+- **64 JVM-Unit-Tests, 0 Failures/Errors** (frische XMLs 14:37): EpgDataTest 21/21 (3
+  Wanduhr-Basis-Tests + Codex-Cache-Regressionstest), HomeData 10, ChannelQuality 10,
+  RecentWatch 9, FallbackPolicy 4, PlaybackStatus 4, PlayerDiagnostics 6.
+- Code-Ebene erneut geprüft: `updateChannels` (Cache-Clear) läuft vor `refreshPrograms`
+  (Room-Neuaufbau), `mapDbPrograms` in konsistenter Wanduhr-Basis, `git diff --check` sauber.
+- Kein Gerät/`adb`: reale Wiedergabe/D-Pad weiterhin unverifiziert. Kein Commit/Push/Reset;
+  `CORE_TV_ACCEPTED` bleibt Claude-Verdikt.
+
+## 2026-09-19 — Codex-Fallback: angefangene EPG-Runde geprüft, kein neuer Code
+- Ausschließlich den uncommitteten EPG-5-h-Zeitbasis-Fix und seinen Testdiff geprüft;
+  Wanduhr-Slotbasis ist mit Guide-/Home-Konsumenten konsistent, `git diff --check` sauber.
+- Voller Offline-Build erneut versucht, aber vor Gradle durch den bekannten transienten
+  WSL-Interop-Fehler `UtilBindVsockAnyPort:309: socket failed 1` blockiert. Kein Linux-JDK
+  oder Workspace-Override vorhanden; keine Host-Änderung vorgenommen.
+- Bestehende frische XML-Berichte von 14:32 bestätigen weiterhin 64 JVM-Tests ohne Fehler.
+  Keine reale Geräte-/Stream-Verifikation, kein Feature, kein Commit/Push/Reset.
+
+## 2026-09-19 — Implementer-Fallback-Verifikationslauf: WSL-Build-Blocker aufgelöst, Runde 4 unabhängig bestätigt
+- Claude-Runde ausgefallen; übernommen wurde nur die angefangene Aufgabe (Runde-4-EPG-Fix +
+  Codex-Cache-Reparatur verifizieren, blockierten Build ausführen). Kein neues Feature.
+- WSL-Interop wieder funktionsfähig (`cmd.exe`/`java.exe` Exit 0) — der gemeldete
+  `UtilBindVsockAnyPort`-Blocker war transient. Voller Build frisch ausgeführt:
+  `BUILD SUCCESSFUL in 44 s` (45 Tasks, offline, `--rerun-tasks`); **64 JVM-Tests,
+  0 Failures/Errors** (XMLs 14:32, EpgDataTest 21).
+- Unabhängig verifiziert: Wanduhr-Zeitbasis stimmt mit allen Slot-Konsumenten überein
+  (`ProgramRow`, TimeHeader, nowLineX, `epgProgAt`/`nowProg`, `epgScrollTargetX`, Home);
+  Player-Overlay nutzt echte Epoch-Millis und ist unberührt. Codex-Cache-Invalidierung
+  bestätigt. Kein Commit/Push/Reset; `CORE_TV_ACCEPTED` bleibt Claude-Verdikt.
+
+## 2026-09-19 — DeepSeek-Runde 4: EPG-5h-Offset im Guide/Home repariert (Core-TV-Gate „Current time is correct“)
+- Befund: `mapDbPrograms()` erzeugte Slot-Minuten relativ zum 05:00-Fenster; alle Renderer &
+  die Auswahl (`nowMin()`, Header `(h+5)%24`, `nowLineX`, `hh()`, `epgScrollTargetX` und
+  Home-JETZT/Hero) rechnen in Wanduhr-Minuten seit Mitternacht → jedes Programm erschien 5 h
+  zu früh, „Jetzt“ zeigte das 4–5 h spätere Programm. Der Player-Overlay (echte Epoch-Millis)
+  war korrekt und stimmte mit dem Guide nicht überein.
+- Fix: `+ EPG_START_MIN` in `mapDbPrograms` (05:00→300, 12:00→720); Tests: Noon-Fixture
+  korrigiert (war real 17:00), Grid/Now-Line-Basis-Test, `nowProg`-Auswahl-Test.
+- Build frisch: `BUILD SUCCESSFUL in 36 s` (45 Tasks, offline, `--rerun-tasks`), **64
+  JVM-Tests, 0 Failures/Errors** (EpgDataTest 18→21). WSL-Interop funktionierte diesmal.
+- Kein Commit/Push/Reset; kein `CORE_TV_ACCEPTED` (Claude-Verdikt); Codex-Fallback-Reparatur
+  (EpgStore-Cache-Invalidierung) blieb im Working Tree erhalten.
+
+## 2026-09-19 — Codex-Fallback: EPG-Cache-Konsistenz im laufenden Core-TV-Review repariert
+- Ausschließlich die angefangene Claude-Review übernommen, kein neues Feature.
+- `EpgStore.updateChannels()` löscht nun Programme, die nach transientem Grid-Index
+  geschlüsselt sind, vor einer Kanal-Neuordnung; verhindert echte EPG-Zuordnungen zum falschen
+  Sender nach einem Provider-Sync.
+- Regressionstest für Re-Sync-Invaliderung ergänzt; Diff-/Commit-Whitespace geprüft.
+- Frischer Build blockiert durch WSL-Interop (`UtilBindVsockAnyPort` vor Gradle) und fehlendes
+  Linux-JDK; kein Erfolg behauptet. Keine destruktive Git-Aktion, kein Commit/Push.
+
+## 2026-09-19 — DeepSeek Zweit-Fallback-Lauf (Claude rc=1): unabhängige Bestätigung des Checkpoints `6a5fe63`
+- Die angefangene Aufgabe (Home-Runde + Rebase-Reparatur) war bereits committet; dieser Lauf
+  verifizierte den committeten Stand unabhängig (kein neues Feature).
+- Git-Zustand konsolidiert (Worktree sauber, HEAD `6a5fe63`, kein Rebase/keine Marker mehr).
+- API-/Signatur-Abgleich aller Home-Referenzen gegen echten Code, `playRoute` ↔
+  `ZenNavHost`-Route zeichengleich, Fake-Daten-Grep (Regel #2) 0 Treffer.
+- Build/Tests frisch: `BUILD SUCCESSFUL` (38 s, 45 Tasks, offline, `--rerun-tasks`), 61
+  JVM-Unit-Tests, 0 Failures/Errors (XMLs 14:12 frisch gelesen).
+- `DEEPSEEK_RESULT.md` additiv ergänzt; kein `CORE_TV_ACCEPTED` (Claude-Verdikt), kein
+  Commit/Push/Reset; `STATE.md` bleibt `ACTIVE_AGENT=CLAUDE`.
+
 ## 2026-09-19 — DeepSeek Recovery-Runde #2 (Claude rc=1 erneut ausgefallen): Rebase-Reparatur + Review-Verifikation der Home-Runde
 - Claude fiel erneut in seiner Review-Runde aus (Session-Limit). Übernommen wurde
   ausschließlich die angefangene Aufgabe (Review des Working Trees + angetroffener

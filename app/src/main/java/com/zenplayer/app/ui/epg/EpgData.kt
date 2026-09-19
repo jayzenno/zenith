@@ -56,6 +56,12 @@ object EpgStore {
     private val programs = mutableMapOf<Pair<Int, Int>, List<EpgProgram>>()
 
     fun updateChannels(list: List<EpgChannel>) {
+        // Programme are keyed by the channel's transient grid index. A provider sync can
+        // insert, remove, or reorder channels, so keeping the old index-keyed values would
+        // render one sender's real programme on another sender until the next refresh.
+        // Clear them atomically with the channel replacement; refreshPrograms() repopulates
+        // the current mapping from Room immediately afterwards.
+        programs.clear()
         EPG_CHANNELS.clear()
         EPG_CHANNELS.addAll(list)
     }
@@ -191,12 +197,35 @@ fun displayWindowStart(day: Int): Long {
     return cal.timeInMillis
 }
 
+/**
+ * End of the local 05:00–05:00 guide window. This must be calculated as the next local
+ * calendar boundary rather than `start + 24h`: a daylight-saving transition can make that
+ * interval 23 or 25 elapsed hours.
+ */
+fun displayWindowEnd(day: Int): Long = displayWindowStart(day + 1)
+
+private fun wallClockSlot(timestamp: Long, start: Long, end: Long): Int {
+    if (timestamp <= start) return EPG_START_MIN
+    if (timestamp >= end) return EPG_END_MIN
+    val cal = Calendar.getInstance().apply { timeInMillis = timestamp }
+    val minuteOfDay = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+    // The displayed day begins at 05:00, so the following local midnight–04:59 segment
+    // occupies the tail of the same 24-column grid. This is wall-clock math, deliberately
+    // independent of the elapsed milliseconds on DST transition nights.
+    return if (minuteOfDay < EPG_START_MIN) minuteOfDay + 24 * 60 else minuteOfDay
+}
+
 fun mapDbPrograms(dbPrograms: List<DbEpgProgram>, day: Int): List<EpgProgram> {
     val start = displayWindowStart(day)
-    val end = start + (EPG_END_MIN - EPG_START_MIN) * 60_000L
+    val end = displayWindowEnd(day)
     return dbPrograms.filter { it.startTs < end && it.endTs > start }.map { prog ->
-        val s = ((prog.startTs - start) / 60_000).toInt().coerceIn(EPG_START_MIN, EPG_END_MIN)
-        val e = ((prog.endTs - start) / 60_000).toInt().coerceIn(EPG_START_MIN, EPG_END_MIN)
+        // Slot minutes are WALL-CLOCK minutes since midnight (the grid header, the now-line,
+        // epgProgAt/nowProg and ProgramRow all compare against nowMin()/hh()/EPG_START in that
+        // basis). The DB window starts at 05:00, so its next-midnight segment needs the
+        // following-day offset (00:00 -> 1440); `wallClockSlot` keeps that basis correct
+        // even on daylight-saving transition nights.
+        val s = wallClockSlot(prog.startTs, start, end)
+        val e = wallClockSlot(prog.endTs, start, end)
         EpgProgram(s = s, e = e, t = prog.title, c = prog.description ?: "")
     }
 }
