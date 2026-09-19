@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+AI_TEAM_VERSION="1.4.5"
+
+case "${1:-}" in
+  --version|-V|version|check)
+    echo "SCRIPT_OK $AI_TEAM_VERSION"
+    exit 0
+    ;;
+esac
+
 MODE="${1:-core-tv}"
 MAX_ROUNDS="${2:-0}"
 ROUND=1
@@ -161,7 +170,7 @@ if [[ "$MODE" == "resume" ]]; then
 fi
 
 echo "======================================"
-echo " Zenith AI Team"
+echo " Zenith AI Team v$AI_TEAM_VERSION"
 echo " Session: $SESSION_ID"
 echo " Mode: $MODE"
 echo " Max rounds: $MAX_ROUNDS (0 = unbegrenzt)"
