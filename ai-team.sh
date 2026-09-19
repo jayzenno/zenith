@@ -74,10 +74,8 @@ run_deepseek() {
   local prompt="$1"
   local tag="${2:-r$ROUND}"
   local log="$LOG_DIR/deepseek-$tag.log"
-  set +e
   opencode run --agent implementer "$prompt" 2>&1 | tee "$log"
   local rc=${PIPESTATUS[0]}
-  set -e
   if is_quota_error "$log"; then mark_unavailable deepseek; return 20; fi
   return "$rc"
 }
@@ -86,10 +84,8 @@ run_claude() {
   local prompt="$1"
   local tag="${2:-r$ROUND}"
   local log="$LOG_DIR/claude-$tag.log"
-  set +e
   claude -p "$prompt" 2>&1 | tee "$log"
   local rc=${PIPESTATUS[0]}
-  set -e
   if is_quota_error "$log"; then mark_unavailable claude; return 20; fi
   return "$rc"
 }
@@ -99,10 +95,8 @@ run_codex() {
   local tag="${2:-r$ROUND}"
   local log="$LOG_DIR/codex-$tag.log"
   agent_available codex || return 30
-  set +e
   codex exec -m gpt-5.6-terra -c 'model_reasoning_effort="medium"' --sandbox workspace-write "$prompt" 2>&1 | tee "$log"
   local rc=${PIPESTATUS[0]}
-  set -e
   if is_quota_error "$log"; then mark_unavailable codex; return 20; fi
   return "$rc"
 }
@@ -142,14 +136,17 @@ resume_interrupted_work() {
   local prompt="Du bist der Recovery-Reviewer für einen unerwartet unterbrochenen Zenith-AI-Lauf. Lies ZENITH_MASTERPLAN.md vollständig und danach git status/diff sowie .ai-collab/STATE.md, TO_CLAUDE.md, TO_DEEPSEEK.md, CHANGELOG.md und DEEPSEEK_RESULT.md. Rekonstruiere, was mitten in der Arbeit unterbrochen wurde. Beende nur diese aktuelle Aufgabe sauber: fehlende Imports/State-/Lifecycle-/UI-/Build-Probleme reparieren, relevante Tests/Builds ausführen, keine neue Roadmap-Aufgabe beginnen. Prüfe besonders, ob der STATE-Handoff voreilig geschrieben wurde. Dokumentiere Ergebnis und nächsten konkreten Handoff. Kein reset, kein push."
 
   if agent_available claude; then
-    run_claude "$prompt" "resume"; rc=$?
-    [[ "$rc" -eq 0 ]] || handle_failure claude "$rc"
+    run_claude "$prompt" "resume"
+    rc=$?
+    if [[ "$rc" -ne 0 ]]; then handle_failure claude "$rc"; fi
   elif agent_available deepseek; then
-    run_deepseek "$prompt" "resume"; rc=$?
-    [[ "$rc" -eq 0 ]] || handle_failure deepseek "$rc"
+    run_deepseek "$prompt" "resume"
+    rc=$?
+    if [[ "$rc" -ne 0 ]]; then handle_failure deepseek "$rc"; fi
   elif agent_available codex; then
-    run_codex "$prompt" "resume"; rc=$?
-    [[ "$rc" -eq 0 ]] || handle_failure codex "$rc"
+    run_codex "$prompt" "resume"
+    rc=$?
+    if [[ "$rc" -ne 0 ]]; then handle_failure codex "$rc"; fi
   else
     echo "Kein AI-CLI verfügbar."
     exit 1
@@ -191,8 +188,9 @@ MODUS=$MODE.
 Wähle genau EINE klar abgegrenzte, höchstwertige Aufgabe. Wenn der Handoff leer/veraltet/Placeholder ist, wähle selbst den höchsten noch nicht erfüllten Punkt aus dem Masterplan. Wiederhole nicht dieselbe reine Verifikation ohne neue Evidenz. Bei größerer Architektur prüfe soweit praktisch mindestens zwei relevante Quellen/Implementierungen und dokumentiere Erkenntnisse/Lizenz in .ai-collab/RESEARCH.md. Implementiere inkrementell. Diagnose und behebe sichere JDK/JAVA_HOME/Gradle/SDK/Dependency-Probleme selbst. Danach passende Builds/Tests, Regressioncheck und git diff. Aktualisiere DEEPSEEK_RESULT.md, TO_CLAUDE.md, CHANGELOG.md und STATE.md. Kein reset, kein push."
 
   if agent_available deepseek; then
-    run_deepseek "$DEEP_PROMPT"; rc=$?
-    [[ "$rc" -eq 0 ]] || handle_failure deepseek "$rc"
+    run_deepseek "$DEEP_PROMPT"
+    rc=$?
+    if [[ "$rc" -ne 0 ]]; then handle_failure deepseek "$rc"; fi
   else
     echo "DeepSeek nicht verfügbar — aktuelle Runde wird von Fallback übernommen."
     finish_current_task_with_fallback deepseek "CLI nicht verfügbar" || exit 20
@@ -211,8 +209,9 @@ MODUS=$MODE.
 Build-Erfolg ist keine Hardware-Abnahme. Aktualisiere CHANGELOG/STATE/Handoff. Kein reset, kein push."
 
   if agent_available claude; then
-    run_claude "$CLAUDE_PROMPT"; rc=$?
-    [[ "$rc" -eq 0 ]] || handle_failure claude "$rc"
+    run_claude "$CLAUDE_PROMPT"
+    rc=$?
+    if [[ "$rc" -ne 0 ]]; then handle_failure claude "$rc"; fi
   else
     echo "Claude nicht verfügbar — aktuelle Aufgabe per Fallback abschließen und stoppen."
     finish_current_task_with_fallback claude "CLI nicht verfügbar" || exit 20
@@ -232,8 +231,9 @@ Build-Erfolg ist keine Hardware-Abnahme. Aktualisiere CHANGELOG/STATE/Handoff. K
   if [[ "$MODE" != "fix" ]] && grep -Eiq 'warte auf|wait for.*review|kein neuer befund|nothing to do' .ai-collab/TO_DEEPSEEK.md 2>/dev/null; then
     echo ">>> Reviewer-Handoff ist nicht konkret genug. Claude muss einen echten nächsten Task liefern."
     REPAIR_HANDOFF_PROMPT="Dein letzter TO_DEEPSEEK-Handoff ist im Modus $MODE nicht handlungsfähig/zu passiv. Lies ZENITH_MASTERPLAN.md und den aktuellen Code-/Diff-Stand erneut. Schreibe jetzt genau EINEN konkreten nächsten, höchstwertigen Task mit Problem, betroffenen Bereichen und Acceptance Criteria in .ai-collab/TO_DEEPSEEK.md. Kein Placeholder, kein 'warte auf Review', keine bloße Wiederholungsverifikation. Im core-tv bzw. bei nicht akzeptiertem Core muss es ein Core-TV-Task sein. Aktualisiere STATE.md korrekt. Kein neuer Implementierungssprint."
-    run_claude "$REPAIR_HANDOFF_PROMPT" "handoff-repair-r$ROUND"; rc=$?
-    [[ "$rc" -eq 0 ]] || handle_failure claude "$rc"
+    run_claude "$REPAIR_HANDOFF_PROMPT" "handoff-repair-r$ROUND"
+    rc=$?
+    if [[ "$rc" -ne 0 ]]; then handle_failure claude "$rc"; fi
   fi
 
   ROUND=$((ROUND + 1))
