@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-AI_TEAM_VERSION="1.4.5"
+AI_TEAM_VERSION="1.6.0"
 
 case "${1:-}" in
   --version|-V|version|check)
@@ -178,7 +178,7 @@ echo " Start: $START_COMMIT"
 echo " Masterplan: $MASTERPLAN"
 echo "======================================"
 echo "DeepSeek = Implementierung | Claude = Review/Architektur | Codex = Fallback"
-echo "Kein automatischer Commit/Push."
+echo "Kein automatischer Commit/Push. Für Langlauf: ./ai-marathon.sh"
 
 while [[ "$MAX_ROUNDS" -eq 0 || "$ROUND" -le "$MAX_ROUNDS" ]]; do
   if [[ "$MAX_ROUNDS" -eq 0 ]]; then
