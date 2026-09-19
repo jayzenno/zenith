@@ -792,6 +792,64 @@ BUILD SUCCESSFUL (16 s, 45 Tasks executed)
 
 ---
 
+## Recovery-Runde (Claude-Ausfall rc=1): Review-Verifikation statt neuem Feature
+
+`Claude` ist in seiner Review-Runde mit `rc=1` ausgefallen (Session-Limit, Log
+`claude-resume.log`). Der Marathon hat DeepSeek als Fallback eingeschaltet. Übernommen
+wurde **ausschließlich die angefangene Aufgabe** (Review der Core-TV-Runden gemäß
+`TO_CLAUDE.md` NEXT_ACTION). **Kein neues Feature.**
+
+### Verifikation (an Stelle des ausgefallenen Claude-Reviews, im Code belegt)
+- Branch `claude/charming-fermi-jhbd3i`, Working Tree vor dieser Runde sauber; alle
+  Core-TV-Runden sind in `99cfb6e` committet (inkl. Gate-#11-Material
+  `ChannelQuality.kt`, `ChannelQualityTest.kt`, `PlayerScreen.kt`, `EpgScreen.kt`,
+  `EpgViewModel.kt`).
+- Handoff-Behauptungen gegen den echten Quellcode abgeglichen:
+  - `channelQualityHint(name, url)` (pure, JVM-testbar) — 4K/FHD/HD/SD nur aus echten
+    Kanalname/URL, sonst `null`, `_`-Normalisierung, 4K-vor-HD-Reihenfolge — **deckungsgleich**.
+  - `PlayerScreen.kt`: `channelNumber = Channel.number > 0 ?: Zap-Index+1` nur bei LIVE;
+    `ChannelNumberBadge` in `PlayerTopBar` (58 dp) und `ChannelBanner` (52 dp);
+    `QualityBadge` neben `LiveChip` nur bei ableitbarem Hint; VOD/Music ohne Plakette.
+  - `EpgScreen.kt`: `MediaPlayPause`/`MediaPlay` → `vm.snapNow()`; Hinweis „Pause = jetzt ·
+    CH ▲ ▼ = Tag · G = Gruppe · C = Menü“ korrekt gesetzt; Now-Marker (`nowLineX`) und
+    JETZT-Zellen-Hervorhebung vorhanden.
+  - Kein Rest von Mock-/Demo-Daten: `MAX_EPG_CHANNELS` nur noch im Kommentar, kein
+    `mockProgramsFor`, kein Favoriten-Seed `{0,2,4,6}` mehr.
+- **Build/Tests frisch ausgeführt** (Windows-JVM, offline, `--rerun-tasks`):
+  ```
+  JAVA_HOME='C:\Program Files\Java\jdk-21.0.12.1' cmd.exe /c gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline --rerun-tasks
+  BUILD SUCCESSFUL in 1m 23s, 45 Tasks executed
+  ```
+  **51 JVM-Unit-Tests, 0 Failures/Errors** (XMLs frisch gelesen, Zeitstempel der Läufe):
+  `ChannelQualityTest` 10/10, `EpgDataTest` 18/18, `RecentWatchTest` 9/9,
+  `FallbackPolicyTest` 4/4, `PlaybackStatusTest` 4/4, `PlayerDiagnosticsTest` 6/6.
+- Core-TV-Gate-Checkliste einmal komplett gegen den committeten Stand geprüft: alle
+  Gate-Punkte sind im Code abgebildet (echte EPG-Daten, Now-Marker, Grid-Virtualisierung +
+  Focus-Follow, Anbieter-Kategorien und Alle/Favoriten/Zuletzt-gesehen im Guide, keine
+  Silent-Truncation, Zap-Overlay komplett, deterministischer Einmal-Fallback).
+
+### Einziger halbfertiger Befund (behoben, Haushalt statt Feature)
+- Commit `d785816` („ignore marathon runtime files“) ignorierte `.ai-collab/marathon-logs/`
+  und `MARATHON_RUNNING`, **aber nicht** `/zenith-marathon.out` — das Root-Live-Tee-Ziel
+  des Marathons. Dadurch sah `ai-marathon.sh` bei **jeder** Runde einen „Dirty Tree“ und
+  lief in den Recovery-Modus, und `git add -A` hätte die wachsende Konsolenmitschrift in
+  Checkpoints gespült.
+- Fix: `.gitignore` um `/zenith-marathon.out` ergänzt (eine Zeile, nicht-destruktiv).
+
+### Bewusst NICHT getan
+- **Kein `CORE_TV_ACCEPTED`** in `.ai-collab/CORE_STATUS.md` geschrieben: der
+  Gate-Accept ist laut Masterplan Claude-Verdikt („When Claude independently verifies“).
+  Meine Verifikation ist als Review-Input dokumentiert; Claude trifft die Entscheidung.
+- Kein neues Feature, kein Reset/Push, keine destruktive Git-Aktion.
+
+### Noch offen (unverändert)
+- Kein Gerät/`adb`: echte Wiedergabe, D-Pad-/Zap-Sitzung und Badge-Optik auf TV-Hardware
+  weiterhin nicht verifiziert. `BUILD SUCCESSFUL != echte Wiedergabe verifiziert`.
+- Bekannte Folgepunkte aus dem Gate-#11-Handoff (HomeScreen-Hardcode-„HD“-Plaketten,
+  Home→Repository-Bindung, „Jetzt LIVE“-/Hero-Platzhalter) bleiben bewusst zurückgestellt.
+
+---
+
 ## Bekannte Einschränkungen
 
 - Der Start-Timeout für den Fallback beträgt 12 s (`PlayerDefaults.START_TIMEOUT_MS`). Ein

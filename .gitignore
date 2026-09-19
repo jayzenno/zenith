@@ -14,4 +14,5 @@ app/build
 .ai-collab/LAST_SESSION
 .ai-collab/marathon-logs/
 .ai-collab/MARATHON_RUNNING
-zenith-marathon.out
+# Marathon console capture at workspace root (live tee-target of ai-marathon.sh)
+/zenith-marathon.out

@@ -1,5 +1,26 @@
 # AI Collaboration Changelog
 
+## 2026-09-19 — DeepSeek Recovery-Runde (Claude rc=1 ausgefallen): Review-Verifikation statt neuem Feature
+- Claude fiel in seiner Review-Runde aus (Session-Limit, `claude-resume.log`); Marathon
+  schaltete DeepSeek als Fallback ein. Übernommen wurde ausschließlich die angefangene
+  **Review-Aufgabe** (Gate-#11-Handoff verifizieren) — kein neues Feature, kein Reset/Push.
+- Review-Verifikation gegen den committeten Stand (`99cfb6e`): `ChannelQuality.kt`
+  deckungsgleich (nur echte Kanalname/URL-Daten, `_`-Normalisierung, 4K vor HD),
+  `PlayerScreen.kt` (echte Kanalnummer + `QualityBadge` nur bei ableitbarem Wert, VOD/Music
+  ohne Plakette), `EpgScreen.kt` (`MediaPlayPause`/`MediaPlay` → `snapNow()`, korrigierter
+  Tasten-Hinweis), Now-Marker vorhanden; keine Mock-/Demo-Reste
+  (`mockProgramsFor`/`MAX_EPG_CHANNELS`/Favoriten-Seed weg).
+- Build/Tests frisch: `BUILD SUCCESSFUL` (1 m 23 s, 45 Tasks, offline, `--rerun-tasks`),
+  **51 JVM-Unit-Tests, 0 Failures/Errors** (ChannelQuality 10, EpgData 18, RecentWatch 9,
+  FallbackPolicy 4, PlaybackStatus 4, PlayerDiagnostics 6).
+- Static-Fix: `/zenith-marathon.out` (Live-Tee-Ziel des Marathons, Root) fehlte in
+  `.gitignore` → Marathon lief bei jeder Runde in „Dirty Tree → Recovery-Modus“ und hätte
+  die Mitschrift per `git add -A` eingecheckt. Eine Zeile ergänzt.
+- `CORE_TV_ACCEPTED` bewusst **nicht** geschrieben (Claude-Verdikt laut Masterplan);
+  Gate-Checkliste auf Code-Ebene als vollständig bedient dokumentiert.
+- `DEEPSEEK_RESULT.md`/`TO_CLAUDE.md` aktualisiert; `STATE.md` bleibt
+  `ACTIVE_AGENT=CLAUDE` (als Nächstes Claude: unabhängiger Review + Gate-Entscheid).
+
 ## 2026-09-19 — DeepSeek Core-TV-Runde (Code-Change: Premium-Zap-Overlay — echte Kanalnummer + ehrliche Qualitäts-Badges, Gate #11)
 - `MODUS=core-tv`, `TO_DEEPSEEK.md` weiterhin nur Platzhalter → höchster noch nicht
   vollständig erfüllter Gate-Punkt selbst gewählt: **Gate #11 „Live player has premium zap

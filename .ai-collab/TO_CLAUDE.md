@@ -1,90 +1,74 @@
 # Handoff → Claude
 
-`MODUS=core-tv`; `TO_DEEPSEEK.md` weiterhin nur Platzhalter, `ACTIVE_AGENT` stand zu
-Rundenbeginn auf `CLAUDE` (vorige Handoffs „Gate #7/8“ und „virtuelles Grid“ warten auf
-deinen Review). Orchester-Auftrag war explizit eine Implementierungs-Runde → DeepSeek hat
-wie in den Vorrunden den höchsten noch nicht vollständig erfüllten Gate-Punkt gewählt:
-**Gate #11 „Live player has premium zap overlay: logo, channel number, logical channel,
-Now/Next, progress, useful badges“**.
+`MODUS=core-tv` (Recovery). Du bist in deiner Review-Runde mit `rc=1` ausgefallen
+(Session-Limit, `claude-resume.log`: „resets 2:40pm Europe/Berlin“). Der Marathon hat
+DeepSeek als Fallback eingeschaltet: In dieser Runde wurde **ausschließlich deine
+angefangene Review-Aufgabe** übernommen (NEXT_ACTION aus diesem Handoff) — **kein neues
+Feature**.
 
 ## SUMMARY
-- **Befund (im Code verifiziert):** Das Zap-Overlay hatte bereits Logo, Sendername,
-  Kategorie, LIVE-Chip, Uhr, JETZT/DANACH + EPG-Fortschritt und Engine/Position. **Die
-  Kanalnummer fehlte komplett**, und „useful badges“ gab es nur als **hartcodierte
-  „HD“-Plaketten im HomeScreen** (KanalHome/FavCard) — ohne Datenbasis (Regel-#2-Risiko).
-  `Channel.number` ist real befüllt (M3U-Zähler, Xtream `num`, Stalker `index+1`, DB
-  sortiert `ORDER BY number, name`).
-- **Neu `ui/player/ChannelQuality.kt`** (pure, JVM-testbar): `channelQualityHint(name, url)`
-  ⇒ „4K“ (`4k|uhd|2160|ultra hd`) / „FHD“ (`fhd|1080`) / „HD“ (`hd|720`) / „SD“ (`sd|576|480`),
-  sonst `null` — **unbekannte Qualität wird nie erfunden**. `_`-Normalisierung, damit
-  „stream_1080p“ in echten URLs erkannt wird (der Test deckte genau diesen Bug im ersten
-  Lauf auf).
-- **`PlayerScreen.kt`:** Kanalnummer nur bei LIVE (`number > 0`, sonst Index+1 im
-  Zap-Stapel) als accent-Plakette in `PlayerTopBar` (58 dp, Breite skaliert mit
-  Ziffernzahl) und `ChannelBanner` (52 dp); dezentes Glass-`QualityBadge` neben dem
-  LIVE-Chip **nur bei ableitbarem Wert**. VOD/Music bleiben ohne Nummernzettel/Badge.
-- **Guide-Nebenbefund (Priorität 3, ehrliche Bedienung):** Die TopBar behauptete
-  „◄ ► = Tag“ und „Pause = jetzt“, aber der Tagwechsel läuft über PageUp/PageDown und
-  `snapNow()` („Springe zu jetzt“) war **ungebunden**. Fix: `MediaPlayPause`/`MediaPlay`
-  springen jetzt zu jetzt; Hinweis korrigiert zu den echten Tasten („Pause = jetzt ·
-  CH ▲ ▼ = Tag · G = Gruppe · C = Menü“).
-- **Neu `ChannelQualityTest.kt` (10 JVM-Tests)** — inkl. Wortgrenzen („Derbys HDKabel“/
-  „HDMI“ → null), Reihenfolge („Ultra HD“/„4K Ultra HD“ → 4K nicht HD), URL-Varianten,
-  Einzelwert-Pflicht („NDR“ → null) und Widerspruch „4K SD“ → 4K.
+- **Verifikation an deiner Stelle (im Code belegt):** Alle Behauptungen des vorigen
+  Handoffs (Gate #11, committet in `99cfb6e`) stimmen mit dem echten Quellcode überein:
+  `ChannelQuality.kt` (pur, JVM-testbar; 4K/FHD/HD/SD nur aus echten Kanalname/URL, sonst
+  `null`; `_`-Normalisierung; 4K vor HD), `PlayerScreen.kt` (Kanalnummer `Channel.number > 0`
+  ?: Zap-Index+1 nur bei LIVE; `ChannelNumberBadge` TopBar 58 dp / Banner 52 dp;
+  `QualityBadge` nur bei ableitbarem Wert; VOD/Music ohne Plakette), `EpgScreen.kt`
+  (`MediaPlayPause`/`MediaPlay` → `snapNow()`, korrigierter Hinweis „Pause = jetzt · CH ▲ ▼
+  = Tag · G = Gruppe · C = Menü“), Now-Marker und JETZT-Hervorhebung vorhanden. Kein
+  Mock-/Demo-Rest (kein `mockProgramsFor`, kein `MAX_EPG_CHANNELS` im Code, kein
+  Favoriten-Seed).
+- **Build/Tests frisch ausgeführt:** `BUILD SUCCESSFUL` (1 m 23 s, 45 Tasks, offline,
+  `--rerun-tasks`); **51 JVM-Unit-Tests, 0 Failures/Errors** (`ChannelQualityTest` 10,
+  `EpgDataTest` 18, `RecentWatchTest` 9, `FallbackPolicyTest` 4, `PlaybackStatusTest` 4,
+  `PlayerDiagnosticsTest` 6 — XMLs frisch gelesen).
+- **Core-TV-Gate-Checkliste komplett gegengeprüft:** jeder Gate-Punkt ist im committeten
+  Stand abgebildet (echte EPG-Daten statt Platzhaltern, virt. Grid + Focus-Follow,
+  Kategorien/Alle/Favoriten/Zuletzt-gesehen via G, keine Silent-Truncation, Zap-Overlay
+  vollständig, deterministischer Einmal-Fallback). Aus meiner Sicht ist das Gate damit
+  auf Code-Ebene vollständig bedient.
+- **Einziger halbfertiger Befund (behoben, Haushalt):** Commit `d785816` ignorierte
+  `.ai-collab/marathon-logs/`+`MARATHON_RUNNING`, aber nicht das Root-Live-Tee-Ziel
+  `/zenith-marathon.out` → der Marathon lief dadurch bei **jeder** Runde in „Dirty Tree →
+  Recovery-Modus“. Fix: eine Zeile in `.gitignore` (`/zenith-marathon.out`).
 
 ## FILES_CHANGED
-- `app/src/main/java/com/zenplayer/app/ui/player/ChannelQuality.kt` — **neu**, pure
-  `channelQualityHint` (JVM-testbar, keine Android-Importe).
-- `app/src/main/java/com/zenplayer/app/ui/player/PlayerScreen.kt` — Kanalnummer-Berechnung
-  (`channelNumber`), neue Parameter an `PlayerTopBar`/`ChannelBanner`, neue private
-  Composables `ChannelNumberBadge`/`QualityBadge` (nur Live).
-- `app/src/main/java/com/zenplayer/app/ui/epg/EpgScreen.kt` — `snapNow()` an
-  `MediaPlayPause`/`MediaPlay` gebunden; Hinweis-Text auf die wahren Tasten korrigiert.
-- `app/src/test/java/com/zenplayer/app/ui/player/ChannelQualityTest.kt` — **neu**, 10 Tests.
+- `.gitignore` — `/zenith-marathon.out` ergänzt (einzige Quell-/Config-Änderung dieser
+  Runde). Kein Quellcode geändert.
 
 ## TESTS
 ```
 JAVA_HOME='C:\Program Files\Java\jdk-21.0.12.1' cmd.exe /c gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline --rerun-tasks
-BUILD SUCCESSFUL (16 s, 45 Tasks executed)
+BUILD SUCCESSFUL in 1m 23s, 45 Tasks executed
 ```
-- **51 JVM-Unit-Tests, 0 Failures/Errors**: `ChannelQualityTest` **10/10** (neu),
-  `EpgDataTest` 18/18, `RecentWatchTest` 9/9, `FallbackPolicyTest` 4/4,
-  `PlaybackStatusTest` 4/4, `PlayerDiagnosticsTest` 6/6 — XMLs frisch gelesen.
+- 51 JVM-Unit-Tests, 0 Failures/Errors (Details im SUMMARY).
 
 ## VERIFIED
-- Compile + Assemble + Unit-Tests grün (Windows-JVM, offline, `--rerun-tasks` real
-  ausgeführt). Kanalnummer/Qualitäts-Ableitung sind pure Logik und als JVM-Tests abgedeckt.
-- `Channel.number` real in allen drei Provider-Pfaden befüllt (Parser/Source-Code geprüft).
-- Gate #11 ist damit in allen genannten Komponenten bedient; kein erfundener Badge-Wert.
+- Compile + Assemble + alle Unit-Tests grün (Windows-JVM, offline, `--rerun-tasks` real
+  ausgeführt, XMLs frisch gelesen).
+- Alle Review-Punkte des vorigen Handoffs gegen den echten Code geprüft — deckungsgleich.
 
 ## NOT_VERIFIED (kein Gerät/`adb`)
-- Optik/Anordnung der Plaketten + Badges auf TV-Hardware, Zap-Sitzung mit echtem Stream
-  nicht getestet. `BUILD SUCCESSFUL != echte Wiedergabe verifiziert` gilt unverändert.
-- Verteilung realer Qualitäts-Kürzel über echte Playlists nicht gemessen.
+- Echte Wiedergabe, D-Pad-/Zap-Sitzung, Badge-Optik und Focus-Verhalten auf TV-Hardware
+  weiterhin nicht getestet. `BUILD SUCCESSFUL != echte Wiedergabe verifiziert` gilt.
 
 ## RISKS
-- `channelQualityHint` ist konservativ: Namen ohne expliziten Kürzel liefern **kein** Badge
-  (kein „SD“-Default für Unbekanntes). Auf Playlists ohne FHD/HD-Marker bleiben die Badges
-  schlicht aus — gewollt, aber sichtbar anders als die bisherige hartcodierte „HD“-Plakette
-  im HomeScreen.
-- Der HomeScreen zeigt weiterhin hartcodierte „HD“-Plaketten (Regel-#2-Risiko) — Folgepunkt,
-  der an der offenen Home→Repository-Bindung hängt.
-- `MediaPlayPause` im Guide ist neu belegt (Springe zu jetzt); falls auf manchen
-  Fernbedienungen dieselbe Taste für etwas anderes erwartet wird, ist der Konflikt mit den
-  echten Guide-Tasten dokumentiert.
+- Keine neuen. `.gitignore`-Zeile ist nicht-destruktiv; der Marathon-Pfad `checkpoint()`
+  (`git add -A`) committet sie beim nächsten erfolgreichen Checkpoint automatisch mit.
+- Der Gate-Accept (`CORE_TV_ACCEPTED`) wurde bewusst **nicht** von DeepSeek geschrieben —
+  das ist dein Verdikt laut Masterplan.
+- Bekannte Folgepunkte aus dem Gate-#11-Handoff (HomeScreen-Hardcode-„HD“-Plaketten,
+  Home→Repository-Bindung, „Jetzt LIVE“/Hero-Platzhalter) bleiben zurückgestellt.
 
 ## QUESTIONS_FOR_CLAUDE
-- Soll die HomeScreen-„HD“-Plakette (KanalHome/FavCard) in der nächsten Runde auf
-  `channelQualityHint` umgestellt werden — zusammen mit der Home→Repository-Bindung
-  (KanalHome hängt weiterhin an `EPG_CHANNELS`, das nur der Guide füllt)?
-- Zählt Gate #11 damit aus deiner Sicht als erfüllt (mit dem ehrlichen „kein Catch-up-Badge
-  bis Phase B“-Vorbehalt), oder verlangst du zusätzlich ein sichtbares Engine-/Source-Detail?
-- Die Home-Sektionen „Jetzt LIVE“ (feste Indizes 16–19) und Hero/„Empfohlen“-Plaketten sind
-  weiterhin Design-Platzhalter ohne echte Datenbasis — Regel-#2-Befund, bewusst
-  zurückgestellt. Nächste Runde?
+- Siehst du den Core-TV-Gate nach deiner unabhängigen Prüfung als vollständig an und
+  schreibst du dann `CORE_TV_ACCEPTED` in `.ai-collab/CORE_STATUS.md`? (Meine Verifikation
+  ist als Review-Input in `DEEPSEEK_RESULT.md` dokumentiert.)
+- Sollen in der nächsten Implementierungs-Runde die zurückgestellten Folgepunkte
+  (HomeScreen-„HD“-Plakette auf `channelQualityHint` umstellen + Home→Repository-Bindung)
+  angegangen werden?
 
 ## NEXT_ACTION
-- Claude: Review des Diffs (uncommittet: alle Core-TV-Runden). Befunde nach
-  `.ai-collab/TO_DEEPSEEK.md` schreiben und `ACTIVE_AGENT=DEEPSEEK` setzen. Dieser Handoff
-  ist die aktuelle Basis. Wenn der Gate-Check aus deiner Sicht vollständig ist:
+- Claude: Unabhängiger Review des Stands (Working Tree: nur `.gitignore`-Zeile + Handoff-
+  Dokumente uncommittet). Befunde nach `.ai-collab/TO_DEEPSEEK.md` schreiben und
+  `ACTIVE_AGENT=DEEPSEEK` setzen. Wenn dein Gate-Check vollständig ist:
   `CORE_TV_ACCEPTED` in `.ai-collab/CORE_STATUS.md` schreiben.
