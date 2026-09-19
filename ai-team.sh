@@ -52,7 +52,9 @@ PRIORITÄT:
 9 Visual Polish
 10 sinnvolle Zusatzfeatures
 
-Keine Änderungen nur für Aktivität. Große Architekturentscheidungen erst untersuchen, dann inkrementell umsetzen. Kein reset, kein push, keine destruktiven Git-Aktionen. Nach jeder Arbeit Build/Tests soweit passend, Regressionen und git diff prüfen, Handoff dokumentieren. Build-Erfolg ist kein Hardware-/Playback-Nachweis. Build-Infrastruktur gehört zur Aufgabe: bei JDK/JAVA_HOME/Gradle/Android-SDK/Dependency-Problemen Ursache selbst diagnostizieren und soweit im Projekt/Workspace sicher möglich beheben, danach den Build erneut versuchen. Keine blinden destruktiven Systemänderungen; echte externe Blocker präzise dokumentieren.
+Keine Änderungen nur für Aktivität. Große Architekturentscheidungen erst untersuchen, dann inkrementell umsetzen.
+OPEN-SOURCE-RECHERCHE:
+Wenn eine Android-TV-, IPTV-, Player-, EPG-, D-pad-, Focus-, Performance- oder Architekturfrage unklar ist, dürft und sollt ihr relevante etablierte Open-Source-Android-TV-/IPTV-/Media-Player-Projekte als Referenz untersuchen. Bevorzugt aktive, seriöse Projekte und Primärquellen. Prüft Lizenz, Architektur, Aktualität und Übertragbarkeit auf Zenith. Konzepte und Patterns dürfen übernommen werden; Code nur wenn die jeweilige Lizenz dies erlaubt und erforderliche Attribution/Lizenzpflichten eingehalten werden. Keine blinde Copy-Paste-Übernahme, keine Lizenzumgehung und keine proprietären Geheimnisse. Dokumentiert bei wesentlichen Übernahmen Quelle/Projekt, Lizenz und was adaptiert wurde. Nutzt Recherche gezielt, wenn sie einen konkreten Blocker löst oder Zenith messbar verbessert. Kein reset, kein push, keine destruktiven Git-Aktionen. Nach jeder Arbeit Build/Tests soweit passend, Regressionen und git diff prüfen, Handoff dokumentieren. Build-Erfolg ist kein Hardware-/Playback-Nachweis. Build-Infrastruktur gehört zur Aufgabe: bei JDK/JAVA_HOME/Gradle/Android-SDK/Dependency-Problemen Ursache selbst diagnostizieren und soweit im Projekt/Workspace sicher möglich beheben, danach den Build erneut versuchen. Keine blinden destruktiven Systemänderungen; echte externe Blocker präzise dokumentieren.
 MISSION
 
 is_quota_error() {
