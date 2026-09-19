@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-MARATHON_VERSION="1.0.0"
+MARATHON_VERSION="1.0.1"
 TEAM_SCRIPT="./ai-team.sh"
 MODE="${1:-core-tv}"
 SLEEP_SECONDS="${AI_MARATHON_RETRY_SECONDS:-600}"
