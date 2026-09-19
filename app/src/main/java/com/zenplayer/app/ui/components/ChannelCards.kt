@@ -2,17 +2,14 @@ package com.zenplayer.app.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -43,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.zenplayer.app.data.model.Channel
+import com.zenplayer.app.ui.player.channelQualityHint
 import com.zenplayer.app.ui.theme.FocusEffect
 import com.zenplayer.app.ui.theme.LocalFocusEffect
 import com.zenplayer.app.ui.theme.LocalZenColors
@@ -56,7 +54,6 @@ private val AccentA = Color(0xFF35CFB2)
 fun LiveChannelCard(channel: Channel, onClick: () -> Unit) {
     val colors = LocalZenColors.current
     val focusEffect = LocalFocusEffect.current
-    val progress = rememberProgress(channel.id.hashCode())
     var focused by remember { mutableStateOf(false) }
     val zoomEnabled = focusEffect == FocusEffect.ZOOM
     val scale by animateFloatAsState(
@@ -65,6 +62,9 @@ fun LiveChannelCard(channel: Channel, onClick: () -> Unit) {
         label = "liveCardScale"
     )
     val shape = RoundedCornerShape(16.dp)
+    // Honest quality marker: derived from the REAL channel name/URL only; channels
+    // without an explicit quality hint get no badge (masterplan rule #2).
+    val quality = channelQualityHint(channel.name, channel.url)
     Box(
         modifier = Modifier
             .width(320.dp)
@@ -105,12 +105,12 @@ fun LiveChannelCard(channel: Channel, onClick: () -> Unit) {
                 Text(channel.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = On, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Spacer(Modifier.height(4.dp))
                 Text(channel.category ?: "Live", fontSize = 11.sp, color = Mut, maxLines = 1)
-                Spacer(Modifier.height(10.dp))
-                ProgressBar(progress, colors.accentStart, colors.accentEnd)
             }
             Spacer(Modifier.width(10.dp))
-            Box(modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(AccentA).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                Text("HD", fontSize = 8.sp, fontWeight = FontWeight.Black, color = Color(0xFF04100C))
+            if (quality != null) {
+                Box(modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(AccentA).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                    Text(quality, fontSize = 8.sp, fontWeight = FontWeight.Black, color = Color(0xFF04100C))
+                }
             }
         }
         // Focus indication drawn above the content so it is visible regardless of any
@@ -168,20 +168,4 @@ fun PosterChannelCard(channel: Channel, onClick: () -> Unit) {
         // ZenFocusEffect is a no-op when unfocused / ZOOM.
         Box(Modifier.matchParentSize().zenFocusEffect(focused, focusEffect, shape))
     }
-}
-
-@Composable
-private fun ProgressBar(progress: Float, start: Color, end: Color) {
-    Box(
-        modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.1f))
-    ) {
-        Box(
-            modifier = Modifier.fillMaxWidth(progress).fillMaxHeight().clip(RoundedCornerShape(50)).background(Brush.horizontalGradient(listOf(start, end)))
-        )
-    }
-}
-
-@Composable
-private fun rememberProgress(seed: Int): Float {
-    return androidx.compose.runtime.remember(seed) { ((seed % 100).coerceAtLeast(0) / 100f).coerceIn(0.05f, 0.95f) }
 }

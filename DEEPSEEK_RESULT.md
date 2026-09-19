@@ -850,6 +850,142 @@ wurde **ausschließlich die angefangene Aufgabe** (Review der Core-TV-Runden gem
 
 ---
 
+## Core-TV Runde (Code-Change): HomeScreen daten-ehrlich + Repository-Bindung (Regel #2)
+
+Der zurückgestellte Folgepunkt aus dem Gate-#11-Handoff („HomeScreen-Hardcode-„HD“-Plaketten,
+Home→Repository-Bindung, „Jetzt LIVE“-/Hero-Platzhalter“) war der höchste verbleibende
+Core-TV-Wert: das Home war die letzte Stelle mit **erfundenen Produktionsinhalten**.
+
+### Behoben (Regel #2: keine Fake-Daten in Produktion)
+- **Hero-Banner fabrizierte einen ganzen Film** („Action Now“, „Ein Undercover-Ermittler flieht
+  vor seiner Vergangenheit…“, „Sender 17 · Sky“, „Spielfilm“) — entfernt. Der Hero zeigt jetzt
+  einen **echten** Live-Sender (zuletzt gesehen → sonst erster Favorit → sonst erster Sender,
+  pure Logik `homeHeroIndex`) mit echtem Namen, Kanalnummer, ehrlichem Qualitäts-Badge und
+  echtem aktuellen Programm (bzw. ehrlich „Keine Programmdaten für diesen Sender“). Ohne
+  Quellen: ehrlicher Onboarding-Zustand („Willkommen bei Zenith … Einstellungen öffnen“)
+  statt erfundener „Now-Playing“-Plakate. „Details“-Button (hatte gar keinen onClick) entfernt.
+- **Fake-VOD-Empfehlungen** („Tatort“, „Die Anstalt“, „Top Gun: Maverick“, „Bundesliga:
+  Topspiel“, „Bares für Rares“ — allesamt erfundene Titel mit leerem onClick) — komplett
+  entfernt (kein VOD-Modul vorhanden; ehrlich weglassen statt erfinden).
+- **Hardcode-„HD“-Plaketten** (KanalHome + FavCard) — durch `channelQualityHint(name, url)`
+  ersetzt: Badge nur, wenn der Providername/die URL die Qualität wirklich impliziert (4K/FHD/
+  HD/SD), sonst nichts.
+- **LiveChannelCard** (`ChannelCards.kt`, Live-TV-Reihen): trug ebenfalls ein dauerhaftes
+  „HD“-Plakettchen plus eine **aus dem Kanal-Id-Hash erfundene Fortschrittsleiste**
+  (`rememberProgress(channel.id.hashCode())`) — Plakette jetzt ehrlich ableitbar, Fake-Progress
+  komplett entfernt (Regel #2; Sender ohne Qualitätshinweis bekommen kein Badge).
+
+### Repository-Bindung (Folgepunkt aus Gate-#11-Handoff)
+- Home sammelt `allLiveChannels()` direkt vom `ChannelRepository` statt des Guide-globalen
+  `EPG_CHANNELS` (der erst gefüllt war, wenn der Guide geöffnet wurde). Die DAO-Query ist
+  deterministisch (`ORDER BY number, name`), d. h. der **Indexraum bleibt identisch zum Guide**
+  (Favoriten-/Recency-Indizes passen weiterhin). Display-Mapping über die gleiche pure
+  Funktion `mapDbChannel` (Kanalnummer = `number > 0` sonst Position+1, Initialen, Name-Art)
+  — die Home-Reihen („Deine Favoriten“, „Jetzt LIVE“, Kanalliste) sind damit sofort nach einer
+  Synchronisierung korrekt, unabhängig vom Guide-Besuch.
+- **Alle Home-Karten spielen jetzt echt**: `FavCard`/`LiveTile`/KanalHome-Zeilen hatten
+  `onClick = {}` (tot); sie navigieren jetzt über den realen Player-Route
+  `player/{provider}/{mediaType}/{channelId}` (`Uri.encode`).
+- Kanalliste (KanalHome) mit leerer Datenbank: ehrlicher `EmptyState` mit
+  „Einstellungen öffnen“ statt leerer Liste ohne Kontext.
+
+### Neu, testbar
+- `ui/home/HomeData.kt` — pure `homeHeroIndex(channels, favs, recent)` (Recency zuerst,
+  dann Favoriten, dann erster Sender; `null` bei leerer Liste).
+- `HomeDataTest.kt` — 10 JVM-Tests (inkl. Provider-Scoping der Recency-Keys, out-of-range-
+  Favoriten, „Geister“-Recency-Einträge nach Sender-Entfernung).
+
+### Build & Test (Windows-JVM, offline, `--rerun-tasks`, real ausgeführt)
+```
+JAVA_HOME='C:\Program Files\Java\jdk-21.0.12.1' cmd.exe /c gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline --rerun-tasks
+BUILD SUCCESSFUL in 52s, 45 Tasks executed
+```
+**61 JVM-Unit-Tests, 0 Failures/Errors** (XMLs frisch gelesen):
+`HomeDataTest` 10/10 (neu), `ChannelQualityTest` 10/10, `EpgDataTest` 18/18,
+`RecentWatchTest` 9/9, `FallbackPolicyTest` 4/4, `PlaybackStatusTest` 4/4,
+`PlayerDiagnosticsTest` 6/6.
+
+### Bewusst NICHT getan
+- Kein `CORE_TV_ACCEPTED` (Claude-Verdikt), kein Reset/Push, keine destruktive Git-Aktion.
+- Kein Produktions-Progress auf Live-Karten erfunden (ProgressBar entfernt statt „schöner“
+  Fake); echte Playback-Progress-Anzeige bleibt Player-Thema (außerhalb dieser Runde).
+- `STATE.md` bleibt `ACTIVE_AGENT=CLAUDE` (war zu Rundenbeginn bereits so; Claude-Review
+  der Vorrunden steht weiterhin aus).
+
+---
+
+## Recovery-Runde (Claude rc=1 ausgefallen — zweiter Fallback-Durchlauf): Rebase-Reparatur + Verifikation der Home-Runde
+
+`Claude` ist erneut in der Review-Runde mit `rc=1` ausgefallen (Session-Limit). Übernommen
+wurde **ausschließlich die angefangene Aufgabe**: der offene Claude-Review des Working Trees
+(Home-Datenehrlichkeits-Runde) plus der dabei entdeckte **halbfertige Git-Zustand**. **Kein
+neues Feature.**
+
+### Halbfertiger Zustand gefunden und repariert: hängender Rebase mit verunreinigtem Commit
+- Der Branch `claude/charming-fermi-jhbd3i` steckte in einem **interaktiven Rebase**
+  (`0cf9bf3..2bedcba` auf `0cf9bf3`), der an einem `.gitignore`-Konflikt zwischen
+  `0cf9bf3` („fix: ignore marathon nohup output“: `zenith-marathon.out`) und dem
+  Checkpoint `2bedcba` (Kommentar + `/zenith-marathon.out`) hängen geblieben war.
+- Der Konflikt war **nicht aufgelöst**, aber ein externer `git commit --amend` hatte den
+  Zustand bereits committet: `git show HEAD:.gitignore` enthielt die Roh-Marker
+  `<<<<<<< HEAD` / `=======` / `>>>>>>> 2bedcba` **im Commit**.
+- **Fix (nicht-destruktiv):** `.gitignore` auf Kommentar + `/zenith-marathon.out` aufgelöst
+  (deckt die reale Root-Datei ab, `git check-ignore` verifiziert), Commit mit der
+  Checkpoint-Message amendiert (→ absoluter Stand `0d8f1d0`, Parent `0cf9bf3` — exakt der
+  Rebase-Zielzustand). Da `git rebase --continue` nach externem Amend den Sequencer-Zustand
+  nicht mehr akzeptierte („You must edit all merge conflicts“ bei leerem unmerged-Index),
+  wurde der Rebase über das unterstützte `git rebase --quit` beendet und der Branch-Zeiger
+  per `git branch -f` auf den Rebase-Ergebnis-Commit gesetzt; danach `git checkout` zurück
+  auf die Branch. **Kein Reset, kein Force, keine Inhaltsänderung; der Working Tree wurde
+  nie angetastet.**
+- Endzustand: `git log` = `0d8f1d0` (Checkpoint) → `0cf9bf3` → …; `.gitignore` im Commit
+  ohne Konfliktmarker (0 Treffer geprüft); alle uncommitteten Änderungen + untracked Dateien
+  der Home-Runde unversehrt.
+
+### Review-Verifikation der Home-Runde (im Code belegt, an Stelle des ausgefallenen Claude-Reviews)
+- Handoff-Behauptungen gegen den echten Quellcode abgeglichen **und bestätigt**:
+  - `HomeScreen.kt` bindet `container.channels.allLiveChannels()` (deterministische
+    DAO-Query `ORDER BY number, name`), Display über `mapDbChannel`; Route
+    `player/{provider}/{mediaType}/{channelId}` per `Uri.encode` ist identisch zur
+    `ZenNavHost`-Composable-Route.
+  - `HomeData.kt`: pure `homeHeroIndex` (Recency → erster Favorit → erster Sender, `null`
+    bei leerer Liste) — deckungsgleich mit der Doku.
+  - Alle referenzierten Symbole existieren (`mapDbChannel`, `nowProg`, `nowMin`,
+    `channelQualityHint`, `recentOnlyVis`, `EmptyState`, `ZenCard`, `settings.epgRecent`).
+  - `ChannelCards.kt`: `LiveChannelCard` ohne `rememberProgress`/Hardcode-„HD“, Qualität
+    ausschließlich aus `channelQualityHint(name, url)`.
+- **Grep-Restprüfung (Fake-Daten, Regel #2):** `Text("HD")`, „Action Now“, „Undercover“,
+  „Tatort“, „Top Gun“, „Bundesliga“, „Bares für Rares“, „Sender 17 · Sky“,
+  `rememberProgress`, `listOf(16, 17, 18, 19)`, `EPG_CHANNELS` im Home → **0 Treffer**.
+- Keine Compile-/Verdrahtungs-Lücken: Build + alle 61 Tests frisch grün (s. u.).
+
+### Build & Test (Windows-JVM, offline, `--rerun-tasks`, real ausgeführt)
+```
+JAVA_HOME='C:\Program Files\Java\jdk-21.0.12.1' cmd.exe /c gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline --rerun-tasks
+BUILD SUCCESSFUL in 41s, 45 Tasks executed (45 executed)
+```
+**61 JVM-Unit-Tests, 0 Failures/Errors** (XMLs frisch gelesen, 14:09):
+`HomeDataTest` 10/10, `ChannelQualityTest` 10/10, `EpgDataTest` 18/18,
+`RecentWatchTest` 9/9, `FallbackPolicyTest` 4/4, `PlaybackStatusTest` 4/4,
+`PlayerDiagnosticsTest` 6/6.
+
+### Bewusst NICHT getan
+- **Kein `CORE_TV_ACCEPTED`** in `.ai-collab/CORE_STATUS.md` (existiert nicht): der
+  Gate-Accept bleibt laut Masterplan Claude-Verdikt. Meine Verifikation ist als
+  Review-Input dokumentiert; Claude trifft die Entscheidung.
+- Kein neues Feature, kein Commit der Quellcode-Arbeit (bleibt uncommittet für den
+  Claude-Review), kein Reset/Push, keine destruktive Git-Aktion.
+- Der Rebase `0cf9bf3..2bedcba` wurde nicht neu durchgeführt (Ergebnis-Commit `0d8f1d0`
+  entspricht bereits dem Rebase-Ziel); der verworfene Zwischen-Commit `bc5d1a6` ist nur
+  noch ein unreferenziertes Objekt und bleibt ohne aktive Referenz erhalten.
+
+### Noch offen (unverändert)
+- Kein Gerät/`adb`: echte Wiedergabe, D-Pad-/Zap-Sitzung, Home-Optik auf TV-Hardware weiterhin
+  nicht verifiziert (`BUILD SUCCESSFUL != echte Wiedergabe verifiziert`).
+- Claude-Review des Working Trees (4 geänderte, 2 neue Dateien) + `CORE_TV_ACCEPTED`-Entscheid.
+
+---
+
 ## Bekannte Einschränkungen
 
 - Der Start-Timeout für den Fallback beträgt 12 s (`PlayerDefaults.START_TIMEOUT_MS`). Ein

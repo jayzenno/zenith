@@ -1,5 +1,6 @@
 package com.zenplayer.app.ui.home
 
+import android.net.Uri
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -21,7 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -29,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,16 +45,28 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zenplayer.app.ZenPlayerApplication
+import com.zenplayer.app.data.model.Channel
+import com.zenplayer.app.data.model.MediaType
 import com.zenplayer.app.data.settings.ZenSettings
+import com.zenplayer.app.ui.components.EmptyState
 import com.zenplayer.app.ui.components.ZenCard
-import com.zenplayer.app.ui.components.ZenShapes
-import com.zenplayer.app.ui.epg.EPG_CHANNELS
-import com.zenplayer.app.ui.epg.channelArt
+import com.zenplayer.app.ui.epg.EpgChannel
+import com.zenplayer.app.ui.epg.mapDbChannel
 import com.zenplayer.app.ui.epg.nowMin
 import com.zenplayer.app.ui.epg.nowProg
+import com.zenplayer.app.ui.player.channelQualityHint
 import com.zenplayer.app.ui.theme.LocalHomeStyle
 import com.zenplayer.app.ui.theme.LocalZenColors
 import com.zenplayer.app.ui.theme.LocalZenPreset
+import com.zenplayer.app.ui.theme.ZenColors
+import com.zenplayer.app.ui.theme.ZenPreset
+
+/**
+ * Real player route for a real provider channel ("player/{provider}/LIVE/{channelId}").
+ * Every Home card that looks playable starts the actual stream — never a placeholder.
+ */
+private fun playRoute(channel: Channel): String =
+    "player/${channel.providerId}/${channel.mediaType.name}/${Uri.encode(channel.id)}"
 
 @Composable
 fun HomeScreen(onNavigate: (String) -> Unit) {
@@ -60,52 +74,58 @@ fun HomeScreen(onNavigate: (String) -> Unit) {
     val preset = LocalZenPreset.current
     val homeStyle = LocalHomeStyle.current
     val app = LocalContext.current.applicationContext as ZenPlayerApplication
-    val providers by app.container.iptvRepo.providersFlow.collectAsStateWithLifecycle(initialValue = emptyList())
-    val settings by app.container.settings.settingsFlow.collectAsStateWithLifecycle(initialValue = ZenSettings())
-    val favs = settings.epgFavs
+    // Repository-bound: the same deterministic `allLiveChannels()` flow the Guide uses
+    // (ORDER BY number, name), so Home channel indices stay in the Guide's index space.
+    val channels by app.container.channels.allLiveChannels()
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val settings by app.container.settings.settingsFlow
+        .collectAsStateWithLifecycle(initialValue = ZenSettings())
+
+    // Display mapping identical to the Guide: provider number (else position+1),
+    // name-based art/code. Pure derivation from REAL channel data.
+    val epg: List<EpgChannel> = remember(channels) { channels.mapIndexed { i, ch -> mapDbChannel(ch, i) } }
 
     when (homeStyle) {
-        "kanal" -> KanalHome(settings, onNavigate)
-        else -> HubHome(settings, favs, onNavigate, colors, preset)
+        "kanal" -> KanalHome(channels, epg, onNavigate)
+        else -> HubHome(channels, epg, settings, onNavigate, colors, preset)
     }
 }
 
 @Composable
 private fun HubHome(
+    channels: List<Channel>,
+    epg: List<EpgChannel>,
     settings: ZenSettings,
-    favs: Set<Int>,
     onNavigate: (String) -> Unit,
-    colors: com.zenplayer.app.ui.theme.ZenColors,
-    preset: com.zenplayer.app.ui.theme.ZenPreset
+    colors: ZenColors,
+    preset: ZenPreset
 ) {
     val scroll = rememberScrollState()
+    val favs = settings.epgFavs
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(scroll)
             .padding(horizontal = 28.dp, vertical = 26.dp)
     ) {
-        HeroBanner(onNavigate, colors, preset)
+        HeroBanner(channels, epg, settings, onNavigate, colors, preset)
+        if (channels.isEmpty()) return@Column
         Spacer(Modifier.height(26.dp))
         if (favs.isNotEmpty()) {
             SectionTitle("Deine Favoriten", "Zum Live-TV", colors)
             Spacer(Modifier.height(12.dp))
-            FavRow(favs, colors)
+            FavRow(channels, epg, favs, onNavigate, colors)
             Spacer(Modifier.height(26.dp))
         }
         SectionTitle("Jetzt LIVE", "Sender", colors)
         Spacer(Modifier.height(12.dp))
-        LiveTileRow(colors)
-        Spacer(Modifier.height(26.dp))
-        SectionTitle("Empfohlen für dich", "Mehr ansehen", colors)
-        Spacer(Modifier.height(12.dp))
-        PostRow(colors)
+        LiveTileRow(channels, epg, onNavigate, colors)
         Spacer(Modifier.height(40.dp))
     }
 }
 
 @Composable
-private fun KanalHome(settings: ZenSettings, onNavigate: (String) -> Unit) {
+private fun KanalHome(channels: List<Channel>, epg: List<EpgChannel>, onNavigate: (String) -> Unit) {
     val colors = LocalZenColors.current
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 26.dp),
@@ -116,34 +136,53 @@ private fun KanalHome(settings: ZenSettings, onNavigate: (String) -> Unit) {
             Text("Kanalliste", style = MaterialTheme.typography.displaySmall, color = colors.onSurface)
             Spacer(Modifier.height(18.dp))
         }
-        items(EPG_CHANNELS) { ch ->
-            val vi = EPG_CHANNELS.indexOf(ch)
-            val prog = nowProg(vi, 0, nowMin())
-            ZenCard(
-                onClick = { onNavigate("live") },
-                modifier = Modifier.fillMaxWidth().height(80.dp),
-                shape = RoundedCornerShape(16.dp),
-                cornerRadius = 16.dp
-            ) { focused ->
-                Row(
-                    modifier = Modifier.fillMaxSize().padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Box(
-                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(Brush.horizontalGradient(channelArt(vi))),
-                        contentAlignment = Alignment.Center
+        if (channels.isEmpty()) {
+            item {
+                EmptyState(
+                    title = "Noch keine Kanäle",
+                    message = "Füge in den Einstellungen einen IPTV-Anbieter hinzu und synchronisiere ihn, damit hier deine echten Sender erscheinen.",
+                    actionLabel = "Einstellungen öffnen",
+                    onAction = { onNavigate("settings") },
+                    modifier = Modifier.fillMaxWidth().height(480.dp)
+                )
+            }
+        } else {
+            itemsIndexed(channels) { vi, ch ->
+                // The display mapping is derived from the same real channel; getOrNull only
+                // covers a stale index while the flow refreshes (e.g. provider re-sync).
+                val ec = epg.getOrNull(vi) ?: mapDbChannel(ch, vi)
+                val prog = nowProg(vi, 0, nowMin())
+                ZenCard(
+                    onClick = { onNavigate(playRoute(ch)) },
+                    modifier = Modifier.fillMaxWidth().height(80.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    cornerRadius = 16.dp
+                ) { focused ->
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        Text(ch.code, fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.White)
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(ch.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(prog?.t ?: "–", fontSize = 11.sp, color = colors.onSurface.copy(alpha = 0.55f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    Box(
-                        modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(colors.accentStart).padding(horizontal = 7.dp, vertical = 2.dp)
-                    ) {
-                        Text("HD", fontSize = 9.sp, fontWeight = FontWeight.Black, color = colors.background)
+                        Box(
+                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color(ec.colorStart),
+                                        Color(ec.colorEnd)
+                                    )
+                                )
+                            ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(ec.code, fontSize = 11.sp, fontWeight = FontWeight.Black, color = Color.White)
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(ch.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(prog?.t ?: "Keine Programmdaten", fontSize = 11.sp, color = colors.onSurface.copy(alpha = 0.55f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        channelQualityHint(ch.name, ch.url)?.let { q ->
+                            QualityChip(q, colors)
+                        }
                     }
                 }
             }
@@ -152,8 +191,20 @@ private fun KanalHome(settings: ZenSettings, onNavigate: (String) -> Unit) {
 }
 
 @Composable
-private fun HeroBanner(onNavigate: (String) -> Unit, colors: com.zenplayer.app.ui.theme.ZenColors, preset: com.zenplayer.app.ui.theme.ZenPreset) {
+private fun HeroBanner(
+    channels: List<Channel>,
+    epg: List<EpgChannel>,
+    settings: ZenSettings,
+    onNavigate: (String) -> Unit,
+    colors: ZenColors,
+    preset: ZenPreset
+) {
     val line = colors.onSurface.copy(alpha = 0.12f)
+    val heroIdx = homeHeroIndex(channels, settings.epgFavs, settings.epgRecent)
+    val heroCh = heroIdx?.let { channels.getOrNull(it) }
+    val heroEpg = heroIdx?.let { epg.getOrNull(it) }
+    val prog = heroIdx?.let { nowProg(it, 0, nowMin()) }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -167,7 +218,6 @@ private fun HeroBanner(onNavigate: (String) -> Unit, colors: com.zenplayer.app.u
                 )
             )
             .border(1.dp, line, RoundedCornerShape(16.dp))
-            .clickable { onNavigate("live") }
     ) {
         HeroArt(colors, preset, Modifier.fillMaxSize())
         Box(
@@ -190,52 +240,86 @@ private fun HeroBanner(onNavigate: (String) -> Unit, colors: com.zenplayer.app.u
                     )
                 )
         )
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(36.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(colors.accentStart)
-                        .padding(horizontal = 7.dp, vertical = 2.dp)
-                ) {
-                    Text("LIVE", fontSize = 9.sp, fontWeight = FontWeight.Black, color = colors.background)
+        if (heroCh != null && heroEpg != null) {
+            // REAL live channel + REAL current programme — never an invented banner.
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(36.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(colors.accentStart)
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Text("LIVE", fontSize = 9.sp, fontWeight = FontWeight.Black, color = colors.background)
+                    }
+                    channelQualityHint(heroCh.name, heroCh.url)?.let { q ->
+                        QualityChip(q, colors)
+                    }
+                    Text("Kanal ${heroEpg.num}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = colors.onSurface.copy(alpha = 0.55f))
                 }
-                Text("Sender 17 · Sky", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = colors.onSurface.copy(alpha = 0.55f))
-                Text("Spielfilm", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = colors.onSurface.copy(alpha = 0.55f))
+                Spacer(Modifier.height(10.dp))
+                Text(heroCh.name, fontSize = 38.sp, fontWeight = FontWeight.Black, color = colors.onSurface, lineHeight = 1.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    prog?.t ?: "Keine Programmdaten für diesen Sender",
+                    fontSize = 13.sp,
+                    color = colors.onSurface.copy(alpha = 0.55f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.width(460.dp)
+                )
+                Spacer(Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(colors.accentBrush)
+                            .clickable { onNavigate(playRoute(heroCh)) }
+                            .padding(horizontal = 24.dp, vertical = 11.dp)
+                    ) {
+                        Text("Jetzt ansehen", fontSize = 13.sp, fontWeight = FontWeight.Black, color = colors.background)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.White.copy(alpha = 0.07f))
+                            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(50))
+                            .clickable { onNavigate("epg") }
+                            .padding(horizontal = 24.dp, vertical = 11.dp)
+                    ) {
+                        Text("Zum Guide", fontSize = 13.sp, fontWeight = FontWeight.Black, color = colors.onSurface)
+                    }
+                }
             }
-            Spacer(Modifier.height(10.dp))
-            Text("Action Now", fontSize = 38.sp, fontWeight = FontWeight.Black, color = colors.onSurface, lineHeight = 1.sp)
-            Text(
-                "Ein Undercover-Ermittler flieht vor seiner Vergangenheit – und gerät mitten in einen internationalen Schlagabtausch.",
-                fontSize = 13.sp,
-                color = colors.onSurface.copy(alpha = 0.55f),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.width(460.dp)
-            )
-            Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        } else {
+            // Honest onboarding state instead of an invented "now playing" banner.
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(36.dp)
+            ) {
+                Text("Willkommen bei Zenith", fontSize = 34.sp, fontWeight = FontWeight.Black, color = colors.onSurface, lineHeight = 1.sp)
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Füge deinen ersten IPTV-Anbieter hinzu, damit hier deine echten Sender und Programmdaten erscheinen.",
+                    fontSize = 13.sp,
+                    color = colors.onSurface.copy(alpha = 0.55f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.width(460.dp)
+                )
+                Spacer(Modifier.height(16.dp))
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
                         .background(colors.accentBrush)
-                        .clickable { onNavigate("live") }
+                        .clickable { onNavigate("settings") }
                         .padding(horizontal = 24.dp, vertical = 11.dp)
                 ) {
-                    Text("Jetzt ansehen", fontSize = 13.sp, fontWeight = FontWeight.Black, color = colors.background)
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(Color.White.copy(alpha = 0.07f))
-                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(50))
-                        .padding(horizontal = 24.dp, vertical = 11.dp)
-                ) {
-                    Text("Details", fontSize = 13.sp, fontWeight = FontWeight.Black, color = colors.onSurface)
+                    Text("Einstellungen öffnen", fontSize = 13.sp, fontWeight = FontWeight.Black, color = colors.background)
                 }
             }
         }
@@ -243,7 +327,7 @@ private fun HeroBanner(onNavigate: (String) -> Unit, colors: com.zenplayer.app.u
 }
 
 @Composable
-private fun HeroArt(colors: com.zenplayer.app.ui.theme.ZenColors, preset: com.zenplayer.app.ui.theme.ZenPreset, modifier: Modifier = Modifier) {
+private fun HeroArt(colors: ZenColors, preset: ZenPreset, modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "hero")
     val y1 by transition.animateFloat(0f, 24f, infiniteRepeatable(tween(14000), RepeatMode.Reverse))
     val y2 by transition.animateFloat(0f, -18f, infiniteRepeatable(tween(18000), RepeatMode.Reverse))
@@ -264,7 +348,7 @@ private fun HeroArt(colors: com.zenplayer.app.ui.theme.ZenColors, preset: com.ze
 }
 
 @Composable
-private fun SectionTitle(title: String, action: String, colors: com.zenplayer.app.ui.theme.ZenColors) {
+private fun SectionTitle(title: String, action: String, colors: ZenColors) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(title, fontSize = 17.sp, fontWeight = FontWeight.Black, color = colors.onSurface, letterSpacing = (-0.3).sp)
         Spacer(Modifier.weight(1f))
@@ -272,23 +356,47 @@ private fun SectionTitle(title: String, action: String, colors: com.zenplayer.ap
     }
 }
 
+/** Honest quality badge: only rendered when the provider data actually implies a quality. */
 @Composable
-private fun FavRow(favs: Set<Int>, colors: com.zenplayer.app.ui.theme.ZenColors) {
+private fun QualityChip(quality: String, colors: ZenColors) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(5.dp))
+            .background(colors.surfaceHigh)
+            .border(1.dp, colors.onSurface.copy(alpha = 0.18f), RoundedCornerShape(5.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Text(quality.uppercase(), fontSize = 9.sp, fontWeight = FontWeight.Black, color = colors.onSurface.copy(alpha = 0.85f))
+    }
+}
+
+@Composable
+private fun FavRow(
+    channels: List<Channel>,
+    epg: List<EpgChannel>,
+    favs: Set<Int>,
+    onNavigate: (String) -> Unit,
+    colors: ZenColors
+) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        favs.take(4).forEach { vi ->
-            if (vi in EPG_CHANNELS.indices) {
-                FavCard(vi, Modifier.weight(1f), colors)
-            }
+        favs.filter { it in channels.indices }.take(4).forEach { vi ->
+            FavCard(channels[vi], epg.getOrNull(vi), vi, onNavigate, Modifier.weight(1f), colors)
         }
     }
 }
 
 @Composable
-private fun FavCard(vi: Int, modifier: Modifier, colors: com.zenplayer.app.ui.theme.ZenColors) {
-    val ch = EPG_CHANNELS[vi]
+private fun FavCard(
+    ch: Channel,
+    ec: EpgChannel?,
+    vi: Int,
+    onNavigate: (String) -> Unit,
+    modifier: Modifier,
+    colors: ZenColors
+) {
     val prog = nowProg(vi, 0, nowMin())
     ZenCard(
-        onClick = {},
+        onClick = { onNavigate(playRoute(ch)) },
         modifier = modifier.height(104.dp),
         shape = RoundedCornerShape(16.dp),
         cornerRadius = 16.dp
@@ -298,40 +406,56 @@ private fun FavCard(vi: Int, modifier: Modifier, colors: com.zenplayer.app.ui.th
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
-                modifier = Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).background(Brush.horizontalGradient(channelArt(vi))),
+                modifier = Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            Color(ec?.colorStart ?: 0xFF222222),
+                            Color(ec?.colorEnd ?: 0xFF333333)
+                        )
+                    )
+                ),
                 contentAlignment = Alignment.Center
             ) {
-                Text(ch.code, fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color.White)
+                Text(ec?.code ?: "?", fontSize = 10.sp, fontWeight = FontWeight.Black, color = Color.White)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(ch.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(prog?.t ?: "–", fontSize = 10.sp, color = colors.onSurface.copy(alpha = 0.55f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Box(
-                modifier = Modifier.clip(RoundedCornerShape(5.dp)).background(colors.accentStart).padding(horizontal = 6.dp, vertical = 2.dp)
-            ) {
-                Text("HD", fontSize = 8.sp, fontWeight = FontWeight.Black, color = colors.background)
+            channelQualityHint(ch.name, ch.url)?.let { q ->
+                QualityChip(q, colors)
             }
         }
     }
 }
 
 @Composable
-private fun LiveTileRow(colors: com.zenplayer.app.ui.theme.ZenColors) {
+private fun LiveTileRow(
+    channels: List<Channel>,
+    epg: List<EpgChannel>,
+    onNavigate: (String) -> Unit,
+    colors: ZenColors
+) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        listOf(16, 17, 18, 19).filter { it in EPG_CHANNELS.indices }.forEach { vi ->
-            LiveTile(vi, Modifier.weight(1f), colors)
+        channels.take(4).forEachIndexed { i, ch ->
+            LiveTile(ch, epg.getOrNull(i), i, onNavigate, Modifier.weight(1f), colors)
         }
     }
 }
 
 @Composable
-private fun LiveTile(vi: Int, modifier: Modifier, colors: com.zenplayer.app.ui.theme.ZenColors) {
-    val ch = EPG_CHANNELS[vi]
+private fun LiveTile(
+    ch: Channel,
+    ec: EpgChannel?,
+    vi: Int,
+    onNavigate: (String) -> Unit,
+    modifier: Modifier,
+    colors: ZenColors
+) {
     val prog = nowProg(vi, 0, nowMin())
     ZenCard(
-        onClick = {},
+        onClick = { onNavigate(playRoute(ch)) },
         modifier = modifier.height(116.dp),
         shape = RoundedCornerShape(16.dp),
         cornerRadius = 16.dp
@@ -340,7 +464,13 @@ private fun LiveTile(vi: Int, modifier: Modifier, colors: com.zenplayer.app.ui.t
             modifier = Modifier.fillMaxSize().padding(14.dp),
             verticalArrangement = Arrangement.Bottom
         ) {
-            Text(ch.num.toString(), fontSize = 26.sp, fontWeight = FontWeight.Black, color = Color.White.copy(alpha = 0.14f), modifier = Modifier.align(Alignment.End))
+            Text(
+                (ec?.num ?: 0).toString(),
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Black,
+                color = Color.White.copy(alpha = 0.14f),
+                modifier = Modifier.align(Alignment.End)
+            )
             Spacer(Modifier.weight(1f))
             Box(
                 modifier = Modifier.size(9.dp).clip(RoundedCornerShape(50)).background(colors.accentStart)
@@ -348,59 +478,6 @@ private fun LiveTile(vi: Int, modifier: Modifier, colors: com.zenplayer.app.ui.t
             Spacer(Modifier.height(8.dp))
             Text(ch.name, fontSize = 14.5.sp, fontWeight = FontWeight.Black, color = colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(prog?.t ?: "–", fontSize = 10.sp, color = colors.onSurface.copy(alpha = 0.55f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-}
-
-@Composable
-private fun PostRow(colors: com.zenplayer.app.ui.theme.ZenColors) {
-    val posts = listOf(
-        "Tatort" to "Krimi",
-        "Die Anstalt" to "Satire",
-        "Top Gun: Maverick" to "Film",
-        "Bundesliga: Topspiel" to "Sport",
-        "Bares für Rares" to "Show"
-    )
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        posts.forEach { (title, tag) ->
-            PostCard(title, tag, Modifier.weight(1f), colors)
-        }
-    }
-}
-
-@Composable
-private fun PostCard(title: String, tag: String, modifier: Modifier, colors: com.zenplayer.app.ui.theme.ZenColors) {
-    val preset = LocalZenPreset.current
-    val idx = title.length % 5
-    val bg = when (idx) {
-        0 -> Brush.verticalGradient(listOf(preset.blobA, preset.blobB))
-        1 -> Brush.verticalGradient(listOf(preset.blobB, preset.blobC))
-        2 -> Brush.verticalGradient(listOf(preset.blobC, preset.accentStart))
-        3 -> Brush.verticalGradient(listOf(preset.accentStart, preset.accentEnd))
-        else -> Brush.verticalGradient(listOf(colors.surfaceHigh, colors.surface))
-    }
-    val line = colors.onSurface.copy(alpha = 0.12f)
-    ZenCard(
-        onClick = {},
-        modifier = modifier.height(220.dp),
-        shape = RoundedCornerShape(12.dp),
-        cornerRadius = 12.dp
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize().background(bg).border(1.dp, line, RoundedCornerShape(12.dp)).padding(10.dp),
-            contentAlignment = Alignment.BottomStart
-        ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .clip(RoundedCornerShape(5.dp))
-                    .background(Color.Black.copy(alpha = 0.5f))
-                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(5.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-            ) {
-                Text(tag.uppercase(), fontSize = 8.sp, fontWeight = FontWeight.Black, color = Color.White)
-            }
-            Text(title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colors.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }

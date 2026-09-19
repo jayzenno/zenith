@@ -1,5 +1,58 @@
 # AI Collaboration Changelog
 
+## 2026-09-19 — DeepSeek Recovery-Runde #2 (Claude rc=1 erneut ausgefallen): Rebase-Reparatur + Review-Verifikation der Home-Runde
+- Claude fiel erneut in seiner Review-Runde aus (Session-Limit). Übernommen wurde
+  ausschließlich die angefangene Aufgabe (Review des Working Trees + angetroffener
+  halbfertiger Git-Zustand); **kein neues Feature**.
+- **Halbfertiger Rebase repariert:** `0cf9bf3..2bedcba` hing an einem `.gitignore`-Konflikt;
+  ein externes `git commit --amend` hatte die Konfliktmarker (`<<<<<<<`/`>>>>>>>`) IN den
+  Commit committet. `.gitignore` aufgelöst (Kommentar + `/zenith-marathon.out`), Commit
+  amendiert (Checkpoint-Message), Rebase über `git rebase --quit` + `git branch -f` sauber
+  finalisiert → Branch auf `0d8f1d0` (Parent `0cf9bf3`, exakt Rebase-Ziel). Keine
+  destruktive Aktion; Working Tree (alle uncommitteten Home-Änderungen) nie angetastet.
+- **Review-Verifikation der Home-Runde an Stelle des ausgefallenen Claude-Reviews**
+  (Code-belegt): `allLiveChannels()`-Binding, `playRoute` deckungsgleich mit `ZenNavHost`,
+  `homeHeroIndex` pure korrekt, alle referenzierten Symbole vorhanden; Grep-Restprüfung
+  aller ehemaligen Fake-Inhalte → 0 Treffer; `LiveChannelCard` ohne Fake-Progress/HD.
+- **Build/Tests frisch:**
+  `JAVA_HOME='C:\Program Files\Java\jdk-21.0.12.1' cmd.exe /c gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline --rerun-tasks`
+  → `BUILD SUCCESSFUL` (41 s, 45 Tasks), **61 JVM-Unit-Tests, 0 Failures/Errors**
+  (HomeData 10, ChannelQuality 10, EpgData 18, RecentWatch 9, FallbackPolicy 4,
+  PlaybackStatus 4, PlayerDiagnostics 6; XMLs frisch gelesen).
+- Kein `CORE_TV_ACCEPTED` geschrieben (Claude-Verdikt), kein Push/Commit der Quellcode-Arbeit
+  (bleibt uncommittet für Claude-Review), kein Gerät/`adb` → echte Wiedergabe weiterhin
+  nicht verifiziert. `STATE.md` → `ACTIVE_AGENT=CLAUDE`.
+
+## 2026-09-19 — DeepSeek Core-TV-Runde (Code-Change: Home daten-ehrlich + Home→Repository-Bindung, Regel #2)
+- `MODUS=core-tv`, `TO_DEEPSEEK.md` weiterhin nur Platzhalter → höchster verbleibender
+  Rückstand aus dem Gate-#11-Handoff umgesetzt: **HomeScreen zeigte die letzten erfundenen
+  Produktionsinhalte** — das ist jetzt beseitigt (Regel #2).
+- **Fake raus:** Hero-Banner erfand einen Film („Action Now“, „Ein Undercover-Ermittler…“,
+  „Sender 17 · Sky“, „Spielfilm“); Reihe „Empfohlen für dich“ zeigte erfundene VOD-Titel
+  („Tatort“, „Top Gun: Maverick“, „Bundesliga: Topspiel“, …) mit leerem onClick;
+  KanalHome/FavCard + `LiveChannelCard` trugen Hardcode-„HD“-Plaketten; `LiveChannelCard`
+  zusätzlich eine aus `channel.id.hashCode()` erfundene Fortschrittsleiste. Alles entfernt.
+- **Repository-Bindung:** Home sammelt `container.channels.allLiveChannels()` direkt (statt
+  des Guide-Globalstores, der ohne Guide-Besuch leer blieb); DAO deterministisch
+  (`ORDER BY number, name`) → Favoriten-/Recency-Indexraum identisch zum Guide; Display über
+  dieselbe pure `mapDbChannel` (echte Kanalnummer > sonst Position+1, Initialen, Name-Art).
+- **Hero:** echter Sender via purer `homeHeroIndex` (zuletzt gesehen → 1. Favorit → 1.
+  Sender) + echtes Programm + ehrliches Qualitäts-Badge; ohne Quellen ehrlicher
+  Onboarding-`EmptyState` („Einstellungen öffnen“) statt erfundener Plakate. Alle Home-Karten
+  spielen jetzt wirklich (`playRoute` → Player; vorher `onClick = {}`).
+- **Ehrliche Qualität:** `channelQualityHint(name, url)` als Badge — nur bei ableitbarem Wert
+  (4K/FHD/HD/SD); Sender ohne Hinweis bekommen keine Plakette.
+- Neu `ui/home/HomeData.kt` (pure) + `HomeDataTest` +10 Tests; **61 JVM-Unit-Tests grün**
+  (HomeData 10, ChannelQuality 10, EpgData 18, RecentWatch 9, FallbackPolicy 4,
+  PlaybackStatus 4, PlayerDiagnostics 6), `BUILD SUCCESSFUL` (52 s, 45 Tasks, offline,
+  `--rerun-tasks` real).
+- Grep-Restprüfung: keine `Text("HD")`, keine fabrizierten Titel, kein `rememberProgress`,
+  kein `listOf(16,17,18,19)` → 0 Treffer. `CORE_TV_ACCEPTED` bewusst **nicht** geschrieben
+  (Claude-Verdikt laut Masterplan).
+- `DEEPSEEK_RESULT.md`/`TO_CLAUDE.md` aktualisiert; `STATE.md` bleibt `ACTIVE_AGENT=CLAUDE`
+  (Claude: unabhängiger Review + Gate-Entscheid; Working Tree uncommittet: 2 geänderte,
+  2 neue Dateien).
+
 ## 2026-09-19 — DeepSeek Recovery-Runde (Claude rc=1 ausgefallen): Review-Verifikation statt neuem Feature
 - Claude fiel in seiner Review-Runde aus (Session-Limit, `claude-resume.log`); Marathon
   schaltete DeepSeek als Fallback ein. Übernommen wurde ausschließlich die angefangene
