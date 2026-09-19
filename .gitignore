@@ -12,3 +12,5 @@ app/build
 # AI collaboration runtime logs/state
 .ai-collab/logs/
 .ai-collab/LAST_SESSION
+.ai-collab/marathon-logs/
+.ai-collab/MARATHON_RUNNING
