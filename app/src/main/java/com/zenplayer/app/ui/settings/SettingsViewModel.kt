@@ -249,7 +249,9 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun setEpgFavsOnly(value: Boolean) {
-        viewModelScope.launch { container.settings.setEpgFavsOnly(value) }
+        // Exactly one Guide group active at a time (All / Favoriten / Zuletzt gesehen). The
+        // combined setter prevents a torn state where favorites AND recent are both on.
+        viewModelScope.launch { container.settings.setEpgActiveGroup(if (value) "favs" else "all") }
     }
 
     fun setEpgAutoNow(value: Boolean) {

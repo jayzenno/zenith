@@ -17,11 +17,14 @@ const val EPG_END_MIN = 300 + 1440
 const val EPG_HOURS = 24
 
 /**
- * The EPG grid is not virtualized, so we only ever show a bounded number of channels.
- * Without this cap a real IPTV playlist (thousands of channels) would compose hundreds of
- * thousands of nodes and ANR/OOM the app.
+ * There is deliberately NO hardcoded channel cap anymore. The Guide grid is virtualized
+ * (`LazyColumn`), so a real IPTV playlist with thousands of channels is safe: only the
+ * visible rows are composed. All provider channels are reachable — a hidden `MAX_EPG_CHANNELS`
+ * would silently drop the rest (masterplan rule #4, Core-TV gate "no silent truncation").
+ *
+ * The horizontal axis is a shared `ScrollState` (header + every composed programme row),
+ * so the full 24 h time line stays synchronized regardless of how many rows exist.
  */
-const val MAX_EPG_CHANNELS = 200
 
 data class EpgChannel(
     val name: String,
@@ -38,34 +41,16 @@ data class EpgProgram(
     val c: String
 )
 
-val EPG_CHANNELS = mutableStateListOf(
-    EpgChannel("Das Erste", "DAS", 0xFF24437A, 0xFF3E6CB5, 1),
-    EpgChannel("ZDF", "ZDF", 0xFF001D45, 0xFF335D9C, 2),
-    EpgChannel("RTL", "RTL", 0xFF2A6AE0, 0xFF18A0FB, 3),
-    EpgChannel("Sat.1", "SAT1", 0xFF2A2A3D, 0xFF4C4C6E, 4),
-    EpgChannel("ProSieben", "P7", 0xFFE33E5E, 0xFF7D2A52, 5),
-    EpgChannel("VOX", "VOX", 0xFFE8A800, 0xFF7A5200, 6),
-    EpgChannel("Kabel Eins", "K1", 0xFFD92D27, 0xFF7A1A17, 7),
-    EpgChannel("RTLZWEI", "R2", 0xFF7A2A9C, 0xFFC04DFF, 8),
-    EpgChannel("ZDFneo", "NEO", 0xFF101426, 0xFF3A4A8C, 9),
-    EpgChannel("ARTE", "ARTE", 0xFF2A7B2F, 0xFF4CAF50, 10),
-    EpgChannel("one", "1", 0xFF0E2B52, 0xFF1E5AA8, 11),
-    EpgChannel("3sat", "3SAT", 0xFF0B3B48, 0xFF159BA8, 12),
-    EpgChannel("WDR", "WDR", 0xFF1C4D8C, 0xFF3F7FD6, 13),
-    EpgChannel("NDR", "NDR", 0xFF0C4D3F, 0xFF148A6B, 14),
-    EpgChannel("SWR", "SWR", 0xFF7A0C0C, 0xFFC41C1C, 15),
-    EpgChannel("MDR", "MDR", 0xFF0A3D6B, 0xFF1274B8, 16),
-    EpgChannel("Sky", "SKY", 0xFF0B1C3A, 0xFF1E4B9C, 17),
-    EpgChannel("Sky Sport", "S-S", 0xFF083344, 0xFF0D7D95, 18),
-    EpgChannel("Sky Cinema", "CIN", 0xFF3A0C5E, 0xFF7A2EC4, 19),
-    EpgChannel("Sport1", "SP1", 0xFF243645, 0xFF4A7A8C, 20),
-    EpgChannel("Eurosport", "EU", 0xFFCF3C3C, 0xFF6B1E1E, 21),
-    EpgChannel("DMAX", "MAX", 0xFF0B2418, 0xFF2A6B45, 22),
-    EpgChannel("n-tv", "NTV", 0xFF1C2A6E, 0xFF2E4BD6, 23),
-    EpgChannel("WELT", "WELT", 0xFF111722, 0xFF3B4A63, 24),
-    EpgChannel("Nickelodeon", "NICK", 0xFFD97B00, 0xFFF5A623, 25),
-    EpgChannel("Disney Channel", "DIS", 0xFF12317A, 0xFF2C58C4, 26)
-)
+/**
+ * Deliberately starts EMPTY. Only real provider channels are ever shown:
+ * [EpgStore.updateChannels] replaces this list with the database content
+ * (`EpgViewModel` collects `allLiveChannels()` and maps them here).
+ *
+ * Hardcoded demo channels / mock schedules were removed — in a real IPTV
+ * app fake programme data must never appear in the Guide (masterplan rule #2,
+ * Core-TV gate: "no production placeholders").
+ */
+val EPG_CHANNELS = mutableStateListOf<EpgChannel>()
 
 object EpgStore {
     private val programs = mutableMapOf<Pair<Int, Int>, List<EpgProgram>>()
@@ -87,11 +72,12 @@ object EpgStore {
     }
 }
 
-fun epgProgramsFor(vi: Int, day: Int): List<EpgProgram> {
-    val stored = EpgStore.programsFor(vi, day)
-    if (stored.isNotEmpty()) return stored
-    return mockProgramsFor(vi, day)
-}
+/**
+ * Real EPG data only. Returns whatever was stored for (channel, day) from the
+ * database — never fabricated schedules. A channel without guide data yields an
+ * empty list, and the grid shows an honest empty state instead of mock content.
+ */
+fun epgProgramsFor(vi: Int, day: Int): List<EpgProgram> = EpgStore.programsFor(vi, day)
 
 fun epgProgAt(vi: Int, day: Int, min: Int): Int {
     val a = epgProgramsFor(vi, day)
@@ -102,6 +88,97 @@ fun epgProgAt(vi: Int, day: Int, min: Int): Int {
 
 fun nowProg(vi: Int, day: Int = 0, now: Int = nowMin()): EpgProgram? =
     epgProgramsFor(vi, day).getOrNull(epgProgAt(vi, day, now))
+
+// ---------------------------------------------------------------------------
+// Provider category groups (Core-TV gate: "all provider categories/groups are
+// reachable from Live TV and Guide"). Pure and JVM-testable — the Guide groups
+// playlists by the REAL `Channel.category` value the providers returned.
+
+/** Active Guide group state. The settings writers keep the three fields mutually exclusive. */
+data class EpgGroupState(
+    val favsOnly: Boolean,
+    val recentOnly: Boolean,
+    val category: String?
+)
+
+/**
+ * Distinct provider categories in first-seen (playlist) order — matching how Live TV
+ * renders rows. Blank/null categories are skipped: channels without a group stay in
+ * "all" and are never invented into a fabricated category (masterplan rule #2).
+ */
+fun epgCategories(channels: List<Channel>): List<String> =
+    channels.mapNotNull { it.category?.takeIf { c -> c.isNotBlank() } }.distinct()
+
+/**
+ * Global Guide indices of all channels in [category] (exact match on the stored value,
+ * consistent with Live TV's category rows). Unknown categories / empty input yield an
+ * empty list — never fabricated entries.
+ */
+fun epgCategoryVis(category: String, channels: List<Channel>): List<Int> =
+    channels.indices.filter { channels[it].category == category }
+
+/**
+ * Ordered group cycle of the Guide: the virtual groups ("all", "favs", "recent") first,
+ * then one entry per provider category. Category ids are prefixed ("cat:X") so a provider
+ * category named e.g. "all" can never collide with the virtual groups.
+ */
+fun epgGroupCycle(categories: List<String>): List<String> =
+    listOf("all", "favs", "recent") + categories.map { "cat:$it" }
+
+/**
+ * The next group id after [state] in the cycle (wraps to "all"). Empty virtual groups
+ * ([includeFavs]/[includeRecent]) are skipped so users never press through empty groups.
+ * An active category that vanished from the provider data (renamed/removed) falls back
+ * to "all" instead of hanging the cycle.
+ */
+fun epgNextGroup(
+    state: EpgGroupState,
+    categories: List<String>,
+    includeFavs: Boolean,
+    includeRecent: Boolean
+): String {
+    val cycle = buildList {
+        add("all")
+        if (includeFavs) add("favs")
+        if (includeRecent) add("recent")
+        addAll(categories.map { "cat:$it" })
+    }
+    val current = when {
+        state.category != null -> "cat:${state.category}"
+        state.favsOnly -> "favs"
+        state.recentOnly -> "recent"
+        else -> "all"
+    }
+    val idx = cycle.indexOf(current)
+    return cycle[(idx + 1).coerceAtLeast(0) % cycle.size]
+}
+
+/** Decodes a cycle id back to the plain category name ("cat:X" -> "X"); other ids unchanged. */
+fun epgGroupCategoryName(id: String): String =
+    if (id.startsWith("cat:")) id.substring(4) else id
+
+/**
+ * Horizontal scroll target (in px) that brings the focused programme into view, with a small
+ * leading padding. Pure and JVM-testable so the Guide's focus-follow logic is verifiable
+ * without a device:
+ * - `prog == null` (channel without EPG data) snaps to the start of the window.
+ * - the result is always clamped to `[0, totalWidth - gridWidth]`, so it never over-scrolls.
+ */
+fun epgScrollTargetX(
+    prog: EpgProgram?,
+    gridWidthPx: Int,
+    timeColWpx: Int,
+    padPx: Int = 24
+): Int {
+    if (gridWidthPx < 0 || timeColWpx <= 0) return 0
+    val totalW = timeColWpx * EPG_HOURS
+    val maxX = (totalW - gridWidthPx).coerceAtLeast(0)
+    val left = if (prog != null) {
+        val s = prog.s.coerceAtLeast(EPG_START_MIN)
+        ((s - EPG_START_MIN).toFloat() / 60f * timeColWpx).toInt()
+    } else 0
+    return (left - padPx).coerceIn(0, maxX)
+}
 
 fun displayWindowStart(day: Int): Long {
     val cal = Calendar.getInstance().apply {
@@ -216,108 +293,3 @@ fun programChannelLabel(vi: Int): String {
     val ch = EPG_CHANNELS.getOrNull(vi) ?: EPG_CHANNELS.firstOrNull() ?: return ""
     return ch.name + " · Kanal " + ch.num
 }
-
-private val CHCATS = listOf(
-    "news", "news", "news", "news", "news", "show", "doku", "serie", "doku", "doku",
-    "news", "doku", "news", "news", "news", "news", "news", "sport", "film", "sport",
-    "sport", "doku", "news", "news", "kids", "kids"
-)
-
-private val POOL = listOfNotNull(
-    listOf("Tagesschau", "news"), listOf("heute", "news"), listOf("heute journal", "news"),
-    listOf("WELT Nachrichten", "news"), listOf("n-tv Nachrichten", "news"), listOf("Tagesthemen", "news"),
-    listOf("zdf morgenmagazin", "news"), listOf("Sat.1 Frühstücksfernsehen", "news"), listOf("Börse im Blick", "news"),
-    listOf("Wetter aktuell", "news"), listOf("Sport1 News", "news"), listOf("Sky News", "news"),
-    listOf("Tatort", "serie"), listOf("Polizeiruf 110", "serie"), listOf("Mord mit Aussicht", "serie"),
-    listOf("Wilsberg", "serie"), listOf("Nord bei Nordwest", "serie"), listOf("Die Chefin", "serie"),
-    listOf("SOKO Leipzig", "serie"), listOf("SOKO Köln", "serie"), listOf("Notruf Hafenkante", "serie"),
-    listOf("Großstadtrevier", "serie"), listOf("The Big Bang Theory", "serie"), listOf("Two and a Half Men", "serie"),
-    listOf("NCIS", "serie"), listOf("Criminal Minds", "serie"), listOf("CSI: Den Tätern auf der Spur", "serie"),
-    listOf("Grey's Anatomy", "serie"), listOf("The Walking Dead", "serie"), listOf("Raumschiff Enterprise", "serie"),
-    listOf("Star Trek: Picard", "serie"), listOf("Bergretter", "serie"), listOf("Der Staatsanwalt", "serie"),
-    listOf("Die Doku: Dom-Rebellen", "doku"), listOf("Doku: Planet Erde", "doku"), listOf("Doku: Unsere Ozeane", "doku"),
-    listOf("Spiegel TV", "doku"), listOf("hart aber fair", "doku"), listOf("Anne Will", "doku"),
-    listOf("ZDF Magazin Royale", "doku"), listOf("Die Anstalt", "doku"), listOf("Extra 3", "doku"),
-    listOf("Mythen & Monster", "doku"), listOf("How It's Made", "doku"), listOf("Storm Chasers", "doku"),
-    listOf("Trödeltrupp", "doku"), listOf("Bares für Rares", "show"), listOf("Das perfekte Dinner", "show"),
-    listOf("First Dates – ein Date, das zählt", "show"), listOf("Mein Lokal, Dein Lokal", "show"),
-    listOf("Hochzeit auf den ersten Blick", "show"), listOf("Shopping Queen", "show"), listOf("Der Blaulicht Report", "show"),
-    listOf("Auf Streife", "show"), listOf("K11 – Die neuen Fälle", "show"), listOf("Ab ins Beet!", "show"),
-    listOf("Nur die Liebe zählt", "show"), listOf("ZDFzeit", "doku"), listOf("nano", "news"),
-    listOf("arte Journal", "news"), listOf("Wissenschaft: Quantenwelten", "doku"),
-    listOf("Star Wars: Die letzte Jedi – Docu", "film"), listOf("Top Gun: Maverick", "film"),
-    listOf("Dune: Teil Zwei", "film"), listOf("Oppenheimer", "film"), listOf("Der Pate – Teil II", "film"),
-    listOf("Mad Max: Fury Road", "film"), listOf("Inception", "film"), listOf("Interstellar", "film"),
-    listOf("Ziemlich beste Freunde", "film"), listOf("Der Schuh des Manitu", "film"),
-    listOf("UEFA Europa League", "sport"), listOf("Bundesliga: Topspiel", "sport"),
-    listOf("Sky Sport Bundesliga Live", "sport"), listOf("Tennis: Grand Slam Halbfinale", "sport"),
-    listOf("Boxen: Heavyweight Night", "sport"), listOf("Wrestling: Royal Rumble", "sport"),
-    listOf("SpongeBob Schwammkopf", "kids"), listOf("Phineas und Ferb", "kids"),
-    listOf("Disneys Sofia", "kids"), listOf("Die Gummibärenbande", "kids"),
-    listOf("Alvin und die Chipmunks", "kids"), listOf("Paw Patrol", "kids"),
-    listOf("Bibi Blocksberg", "kids"), listOf("Pumuckl", "kids")
-)
-
-private val POOL_CATS = POOL.map { it[1] }
-
-val PROGRAM_CATEGORIES = mutableSetOf<String>().apply { addAll(POOL_CATS) }
-
-private fun progressCategory(cat: String): String = when (cat) {
-    "news" -> "Nachrichten"
-    "doku" -> "Dokumentation"
-    "serie" -> "Serie"
-    "show" -> "Show"
-    "film" -> "Spielfilm"
-    "sport" -> "Sport"
-    "kids" -> "Kindersendung"
-    else -> "Sendung"
-}
-
-private val MOCK_PROGS = HashMap<String, List<EpgProgram>>()
-
-private fun mockProgramsFor(vi: Int, day: Int): List<EpgProgram> {
-    if (vi !in EPG_CHANNELS.indices) return emptyList()
-    val key = "${vi}_$day"
-    MOCK_PROGS[key]?.let { return it }
-    val rnd = seedRand(vi * 7919 + day * 104729 + 77)
-    val cat = CHCATS[vi % CHCATS.size]
-    val pool = POOL.filter { it[1] == cat || rnd() < 0.16 }
-    if (pool.isEmpty()) return emptyList()
-    val durs = listOf(15, 20, 25, 30, 30, 35, 40, 45, 45, 50, 60, 60, 75, 90, 105, 120, 15, 30, 45)
-    val out = mutableListOf<EpgProgram>()
-    var m = EPG_START_MIN
-    val end = EPG_START_MIN + 1440
-    var last = (Math.floor(rnd() * pool.size)).toInt()
-    while (m < end) {
-        var dr = durs[Math.floor(rnd() * durs.size).toInt()]
-        if (m + dr > end) dr = end - m
-        if (dr < 10) {
-            m += dr
-            continue
-        }
-        var pick = last
-        for (x in 0 until 8) {
-            val j = (Math.floor(rnd() * pool.size)).toInt()
-            if (rnd() < 0.5) pick = j
-        }
-        out.add(
-            EpgProgram(
-                s = m,
-                e = m + dr,
-                t = pool[pick % pool.size][0],
-                c = progressCategory(pool[pick % pool.size][1])
-            )
-        )
-        last = pick
-        m += dr
-    }
-    MOCK_PROGS[key] = out
-    return out
-}
-
-private fun seedRand(seed: Int): () -> Double = {
-    var s = (seed * 1664525 + 1013904223) and 0x7FFFFFFF
-    rndFromLong(s)
-}
-
-private fun rndFromLong(seedVal: Int): Double = seedVal / 2147483648.0

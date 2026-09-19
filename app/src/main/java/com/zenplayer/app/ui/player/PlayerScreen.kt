@@ -74,6 +74,7 @@ import coil3.compose.AsyncImage
 import com.zenplayer.app.data.model.EpgProgram
 import com.zenplayer.app.data.model.MediaType
 import com.zenplayer.app.data.settings.ZenSettings
+import com.zenplayer.app.data.settings.recentWatchKey
 import com.zenplayer.app.di.AppContainer
 import com.zenplayer.app.player.PlaybackProgress
 import com.zenplayer.app.player.PlaybackStatus
@@ -143,9 +144,20 @@ fun PlayerScreen(
     LaunchedEffect(channel?.id, session) {
         val current = channel ?: return@LaunchedEffect
         session.play(current.url, current.name, null)
+        // Record the tuned LIVE channel into the "Zuletzt gesehen" first-class group
+        // (Core-TV gate #8). Idempotent + capped in a single atomic DataStore edit, so
+        // rapid zapping is safe. VOD/Music are deliberately not recorded here — the
+        // group lives in the live-TV Guide.
+        if (mediaType == MediaType.LIVE && current.providerId >= 0L) {
+            container.settings.pushRecentChannel(recentWatchKey(current))
+        }
     }
 
-    val upcomingFlow = remember(channel?.id) { vm.upcoming(channel?.id.orEmpty()) }
+    // EPG identity: the Guide and the XMLTV store both resolve programmes via
+    // tvg-id / epg_channel_id (Channel.extra). The DB id is a URL-derived key and
+    // would never match XMLTV channel attributes for M3U/Xtream.
+    val epgLookupId = channel?.extra?.takeIf { it.isNotBlank() } ?: channel?.id.orEmpty()
+    val upcomingFlow = remember(epgLookupId) { vm.upcoming(epgLookupId) }
     val upcoming by upcomingFlow.collectAsStateWithLifecycle(initialValue = emptyList())
     val nowTick by produceState(initialValue = System.currentTimeMillis(), key1 = channel?.id) {
         while (true) {
@@ -162,6 +174,17 @@ fun PlayerScreen(
     val error = status as? PlaybackStatus.Error
     val timedOut = status == PlaybackStatus.Timeout
     val canSeek = !isLive && progress.durationMs > 0L
+
+    // Premium zap overlay (Core-TV gate #11): the REAL channel number from provider data
+    // (Xtream num / M3U playlist order / Stalker index), fallback to the position in the
+    // tuned channel batch. Quality badges are derived from REAL channel name/URL only —
+    // never fabricated (masterplan rule #2, see channelQualityHint).
+    val channelNumber = if (isLive) {
+        active?.let { a -> a.channel.number.takeIf { it > 0 } ?: (a.index + 1) }
+    } else null
+    val qualityHint = remember(channel?.id) {
+        channel?.let { channelQualityHint(it.name, it.url) }
+    }
 
     var controlsVisible by remember { mutableStateOf(false) }
     var selected by remember { mutableIntStateOf(CONTROL_PLAY) }
@@ -362,7 +385,9 @@ fun PlayerScreen(
                 name = channel?.name ?: mediaType.name,
                 subtitle = channel?.category ?: mediaType.name,
                 logoUrl = channel?.logoUrl,
-                isLive = isLive
+                isLive = isLive,
+                channelNumber = channelNumber,
+                qualityHint = if (isLive) qualityHint else null
             )
         }
 
@@ -402,6 +427,8 @@ fun PlayerScreen(
                 subtitle = channel?.category ?: mediaType.name,
                 logoUrl = channel?.logoUrl,
                 isLive = isLive,
+                channelNumber = channelNumber,
+                qualityHint = if (isLive) qualityHint else null,
                 engineLabel = activeEngine.label,
                 positionLabel = active?.let { "${it.index + 1}/${it.total}" } ?: "-",
                 clock = clock,
@@ -474,7 +501,9 @@ private fun ChannelBanner(
     name: String,
     subtitle: String,
     logoUrl: String?,
-    isLive: Boolean
+    isLive: Boolean,
+    channelNumber: Int?,
+    qualityHint: String?
 ) {
     val colors = LocalZenColors.current
     Row(
@@ -486,12 +515,20 @@ private fun ChannelBanner(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (isLive && channelNumber != null) {
+            ChannelNumberBadge(channelNumber, colors.accentStart, bannerSize = 52.dp, fontSize = 19.sp)
+            Spacer(Modifier.width(12.dp))
+        }
         ChannelLogo(logoUrl = logoUrl, accent = colors.accentStart, size = 52.dp)
         Spacer(Modifier.width(16.dp))
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (isLive) {
                     LiveChip()
+                    if (qualityHint != null) {
+                        Spacer(Modifier.width(8.dp))
+                        QualityBadge(qualityHint)
+                    }
                     Spacer(Modifier.width(12.dp))
                 }
                 Text(
@@ -528,11 +565,64 @@ private fun LiveChip() {
 }
 
 @Composable
+private fun ChannelNumberBadge(
+    num: Int,
+    accent: Color,
+    bannerSize: androidx.compose.ui.unit.Dp,
+    fontSize: androidx.compose.ui.unit.TextUnit
+) {
+    Box(
+        modifier = Modifier
+            .height(bannerSize)
+            .width(
+                when {
+                    num >= 100 -> bannerSize * 1.45f
+                    num >= 10 -> bannerSize * 1.15f
+                    else -> bannerSize
+                }
+            )
+            .clip(ZenShapes.chip)
+            .background(accent.copy(alpha = 0.92f))
+            .border(1.dp, Color.White.copy(alpha = 0.35f), ZenShapes.chip),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            num.toString(),
+            fontSize = fontSize,
+            fontWeight = FontWeight.Black,
+            color = Color.Black,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun QualityBadge(label: String) {
+    Box(
+        modifier = Modifier
+            .clip(ZenShapes.pill)
+            .background(Color.White.copy(alpha = 0.14f))
+            .border(1.dp, Color.White.copy(alpha = 0.28f), ZenShapes.pill)
+            .padding(horizontal = 10.dp, vertical = 3.dp)
+    ) {
+        Text(
+            label,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.Black,
+            color = Color.White,
+            letterSpacing = 0.5.sp
+        )
+    }
+}
+
+@Composable
 private fun PlayerTopBar(
     title: String,
     subtitle: String,
     logoUrl: String?,
     isLive: Boolean,
+    channelNumber: Int?,
+    qualityHint: String?,
     engineLabel: String,
     positionLabel: String,
     clock: String,
@@ -575,6 +665,10 @@ private fun PlayerTopBar(
             )
         }
 
+        if (isLive && channelNumber != null) {
+            Spacer(Modifier.width(20.dp))
+            ChannelNumberBadge(channelNumber, accent, bannerSize = 58.dp, fontSize = 21.sp)
+        }
         Spacer(Modifier.width(20.dp))
         ChannelLogo(logoUrl = logoUrl, accent = accent, size = 58.dp)
         Spacer(Modifier.width(20.dp))
@@ -583,6 +677,10 @@ private fun PlayerTopBar(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (isLive) {
                     LiveChip()
+                    if (qualityHint != null) {
+                        Spacer(Modifier.width(8.dp))
+                        QualityBadge(qualityHint)
+                    }
                     Spacer(Modifier.width(14.dp))
                 }
                 Text(

@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -22,9 +23,12 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
@@ -36,6 +40,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,6 +56,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -58,7 +66,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zenplayer.app.data.model.Channel
-import com.zenplayer.app.data.model.MediaType
 import com.zenplayer.app.data.settings.ZenSettings
 import com.zenplayer.app.di.AppContainer
 import com.zenplayer.app.di.AppViewModelFactory
@@ -90,7 +97,7 @@ fun EpgScreen(container: AppContainer, onExit: () -> Unit, onOpenPlayer: (Channe
     val clock = remember { mutableStateOf(nowMin()) }
 
     DisposableEffect(onOpenPlayer) {
-        vm.onOpenPlayer = { vi -> buildEpgChannel(vi)?.let(onOpenPlayer) }
+        vm.onOpenPlayer = { vi -> vm.channelAt(vi)?.let(onOpenPlayer) }
         onDispose { vm.onOpenPlayer = null }
     }
 
@@ -149,6 +156,8 @@ private fun handleEpgKey(ev: KeyEvent, vm: EpgViewModel, onExit: () -> Unit): Bo
             Key.Escape, Key.Back, Key.Backspace -> { vm.backKey(onExit); true }
             Key.PageUp -> { vm.setDayStep(-1); true }
             Key.PageDown -> { vm.setDayStep(1); true }
+            Key.MediaPlayPause, Key.MediaPlay -> { vm.snapNow(); true }
+            Key.G -> { vm.cycleGroup(); true }
             Key.C -> { vm.openCtx(); true }
             else -> false
         }
@@ -159,20 +168,6 @@ private fun handleEpgKey(ev: KeyEvent, vm: EpgViewModel, onExit: () -> Unit): Bo
         }
     }
     return false
-}
-
-private fun buildEpgChannel(vi: Int): Channel? {
-    val ch = EPG_CHANNELS.getOrNull(vi) ?: return null
-    return Channel(
-        id = "epg_$vi",
-        providerId = -1L,
-        mediaType = MediaType.LIVE,
-        name = ch.name,
-        url = "",
-        logoUrl = null,
-        category = null,
-        number = ch.num
-    )
 }
 
 @Composable
@@ -210,7 +205,7 @@ private fun EpgTopBar(vm: EpgViewModel, settings: ZenSettings, now: Int, colors:
             EpgZbtn("▶", colors) { vm.setDayStep(1) }
         }
         Spacer(Modifier.width(20.dp))
-        Text("Pause = jetzt · ◄ ► = Tag", fontSize = 9.sp, fontWeight = FontWeight.Black, color = colors.onSurface.copy(alpha = 0.45f), letterSpacing = 1.6.sp)
+        Text("Pause = jetzt · CH ▲ ▼ = Tag · G = Gruppe · C = Menü", fontSize = 9.sp, fontWeight = FontWeight.Black, color = colors.onSurface.copy(alpha = 0.45f), letterSpacing = 1.6.sp)
     }
 }
 
@@ -240,22 +235,117 @@ private fun EpgZbtn(text: String, colors: com.zenplayer.app.ui.theme.ZenColors, 
 
 @Composable
 private fun EpgBody(vm: EpgViewModel, settings: ZenSettings, now: Int, colors: com.zenplayer.app.ui.theme.ZenColors) {
-    val vScroll = rememberScrollState()
-    val hScroll = rememberScrollState()
     val vis = vm.currentVis()
+    if (vis.isEmpty()) {
+        // Honest empty state: no channels in the current group / no provider channels
+        // synced yet. The message matches the active group — the Recently Watched group
+        // shows an honest "nothing watched yet" instead of fabricated content.
+        val group = vm.activeGroupLabel()
+        val subtitle = when {
+            group == "Zuletzt gesehen" && EPG_CHANNELS.isNotEmpty() ->
+                "Schau Live-TV oder öffne Kanäle aus dem Guide – deine letzten Sender erscheinen hier."
+            group == "Favoriten" && EPG_CHANNELS.isNotEmpty() ->
+                "Markiere Sender im Kontextmenü (C) mit ♥, um sie hier zu sammeln."
+            settings.epgCategoryGroup != null && EPG_CHANNELS.isNotEmpty() ->
+                "Diese Kategorie enthält in deinen Anbieterdaten derzeit keine Sender."
+            else -> "Füge in den Einstellungen einen IPTV-Anbieter hinzu und synchronisiere."
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(colors.surface.copy(alpha = 0.42f))
+                .border(1.dp, colors.onSurface.copy(alpha = 0.12f), RoundedCornerShape(20.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    if (EPG_CHANNELS.isEmpty()) "Keine Sender vorhanden" else "Keine Sender in \"$group\"",
+                    fontSize = 20.sp, fontWeight = FontWeight.Black, color = colors.onSurface
+                )
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    subtitle,
+                    fontSize = 13.sp,
+                    color = colors.onSurface.copy(alpha = 0.6f),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
+        }
+        return
+    }
+
+    val chColW = settings.scaledChColW()
+    val timeColW = settings.scaledTimeColW()
+    val chRowH = settings.scaledChRowH()
+    val totalW = timeColW * EPG_HOURS
+    val gridHeaderH = settings.scaledGridHeaderH()
+
+    // The grid is virtualized: a LazyColumn only composes the visible rows, so the FULL
+    // provider channel list is rendered without a hardcoded cap (no silent truncation).
+    // The channel column follows the programme grid via snapshotFlow (identical item pitch).
+    // Horizontal scrolling is a SINGLE shared ScrollState across the sticky time header and
+    // every composed programme row — the same sync pattern the grid used before.
+    val hScroll = rememberScrollState()
+    val gridListState = rememberLazyListState()
+    val chListState = rememberLazyListState()
+    var gridWpx by remember { mutableStateOf(0) }
+    val density = LocalDensity.current
+
+    // Vertical focus-follow (D-pad up/down): the selected row always stays visible.
+    LaunchedEffect(vm.row) {
+        if (vis.isNotEmpty()) {
+            gridListState.animateScrollToItem(vm.row.coerceIn(0, vis.size - 1))
+        }
+    }
+    // Keep the channel column vertically in sync with the programme grid.
+    LaunchedEffect(gridListState, chListState) {
+        snapshotFlow { gridListState.firstVisibleItemIndex to gridListState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) -> chListState.scrollToItem(index, offset) }
+    }
+    // Horizontal focus-follow (D-pad left/right): the focused programme cell stays visible.
+    val timeColWpx = with(density) { timeColW.toPx().toInt() }
+    LaunchedEffect(vm.row, vm.ecol, timeColWpx, gridWpx) {
+        val vi = vis.getOrNull(vm.row) ?: return@LaunchedEffect
+        if (gridWpx <= 0) return@LaunchedEffect
+        val prog = epgProgramsFor(vi, vm.day()).getOrNull(vm.ecol)
+        hScroll.animateScrollTo(epgScrollTargetX(prog, gridWpx, timeColWpx))
+    }
+
     Row(
         modifier = Modifier
             .fillMaxSize()
             .padding(14.dp)
     ) {
-        ChannelColumn(vm, vis, now, vScroll, settings, colors, Modifier.width(settings.scaledChColW()).fillMaxHeight())
+        ChannelColumn(
+            vm = vm, vis = vis, now = now, listState = chListState,
+            rowH = chRowH, headerH = gridHeaderH, settings = settings, colors = colors,
+            modifier = Modifier.width(chColW).fillMaxHeight()
+        )
         Spacer(Modifier.width(14.dp))
-        ProgramGrid(vm, vis, now, vScroll, hScroll, settings, colors, Modifier.weight(1f).fillMaxHeight())
+        ProgramGrid(
+            vm = vm, vis = vis, now = now, hScroll = hScroll, listState = gridListState,
+            rowH = chRowH, headerH = gridHeaderH, timeColW = timeColW, totalW = totalW,
+            settings = settings, colors = colors,
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+            onWidthChanged = { gridWpx = it }
+        )
     }
 }
 
 @Composable
-private fun ChannelColumn(vm: EpgViewModel, vis: List<Int>, now: Int, vScroll: androidx.compose.foundation.ScrollState, settings: ZenSettings, colors: com.zenplayer.app.ui.theme.ZenColors, modifier: Modifier) {
+private fun ChannelColumn(
+    vm: EpgViewModel,
+    vis: List<Int>,
+    now: Int,
+    listState: LazyListState,
+    rowH: Dp,
+    headerH: Dp,
+    settings: ZenSettings,
+    colors: com.zenplayer.app.ui.theme.ZenColors,
+    modifier: Modifier
+) {
     val card = colors.surface.copy(alpha = 0.42f)
     val line = colors.onSurface.copy(alpha = 0.12f)
     val focusEffect = LocalFocusEffect.current
@@ -268,70 +358,102 @@ private fun ChannelColumn(vm: EpgViewModel, vis: List<Int>, now: Int, vScroll: a
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(settings.scaledGridHeaderH())
+                .height(headerH)
                 .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween
         ) {
-            Text("SENDER", fontSize = 10.5.sp, fontWeight = FontWeight.Black, color = colors.onSurface.copy(alpha = 0.55f), letterSpacing = 1.5.sp)
-            Text(vis.size.toString(), fontSize = 10.5.sp, fontWeight = FontWeight.Black, color = colors.onSurface.copy(alpha = 0.55f))
+            // Live group label: ALL / FAVS / RECENT plus an honest count. With a group
+            // filter active we show "shown of total", otherwise the full provider count —
+            // never a silently truncated number. The label ellipsizes in narrow columns.
+            Text(vm.activeGroupLabel().uppercase(), fontSize = 10.5.sp, fontWeight = FontWeight.Black, color = colors.onSurface.copy(alpha = 0.55f), letterSpacing = 1.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Text(
+                if (vis.size != EPG_CHANNELS.size) "${vis.size} von ${EPG_CHANNELS.size}" else vis.size.toString(),
+                fontSize = 10.5.sp, fontWeight = FontWeight.Black, color = colors.onSurface.copy(alpha = 0.55f)
+            )
         }
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(vScroll)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+        LazyColumn(
+            state = listState,
+            userScrollEnabled = false,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 8.dp),
             verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(5.dp)
         ) {
-            vis.forEachIndexed { idx, vi ->
-                val selected = idx == vm.row
-                val ch = EPG_CHANNELS.getOrNull(vi) ?: return@forEachIndexed
-                val prog = nowProg(vi, vm.day(), now)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(settings.scaledChRowH())
-                        .clip(RoundedCornerShape(13.dp))
-                        .then(
-                            if (selected) Modifier.background(colors.accentBrush)
-                            else Modifier.background(Color.Transparent)
-                        )
-                        .border(1.dp, if (selected) Color.Transparent else if (vi == vm.currentChannel()) colors.accentEnd else Color.Transparent, RoundedCornerShape(13.dp))
-                        .zenFocusEffect(selected, focusEffect, RoundedCornerShape(13.dp))
-                        .padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)
-                ) {
-                    if (settings.epgLogos) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(Brush.horizontalGradient(channelArt(vi))),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(ch.code, fontSize = 10.sp, fontWeight = FontWeight.Black, color = if (selected) colors.background else Color.White)
-                        }
-                        Spacer(Modifier.width(0.dp))
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(ch.name, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = if (selected) colors.background else colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(prog?.t ?: "–", fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = if (selected) colors.background.copy(alpha = 0.72f) else colors.onSurface.copy(alpha = 0.55f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    Text(ch.num.toString(), fontSize = 9.5.sp, fontWeight = FontWeight.Black, color = if (selected) colors.background.copy(alpha = 0.72f) else colors.onSurface.copy(alpha = 0.45f))
-                    if (vm.isFav(vi)) {
-                        Text("♥", fontSize = 10.sp, color = if (selected) colors.background else Color(0xFFFFD23F))
-                    }
-                }
+            itemsIndexed(vis, key = { _, vi -> vi }) { idx, vi ->
+                ChannelCell(vm, vi, idx, now, rowH, settings, colors, focusEffect)
             }
         }
     }
 }
 
 @Composable
-private fun ProgramGrid(vm: EpgViewModel, vis: List<Int>, now: Int, vScroll: androidx.compose.foundation.ScrollState, hScroll: androidx.compose.foundation.ScrollState, settings: ZenSettings, colors: com.zenplayer.app.ui.theme.ZenColors, modifier: Modifier) {
-    val timeColW = settings.scaledTimeColW()
-    val totalW = timeColW * EPG_HOURS
+private fun ChannelCell(
+    vm: EpgViewModel,
+    vi: Int,
+    idx: Int,
+    now: Int,
+    rowH: Dp,
+    settings: ZenSettings,
+    colors: com.zenplayer.app.ui.theme.ZenColors,
+    focusEffect: com.zenplayer.app.ui.theme.FocusEffect
+) {
+    val selected = idx == vm.row
+    val ch = EPG_CHANNELS.getOrNull(vi) ?: return
+    val prog = nowProg(vi, vm.day(), now)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(rowH)
+            .clip(RoundedCornerShape(13.dp))
+            .then(
+                if (selected) Modifier.background(colors.accentBrush)
+                else Modifier.background(Color.Transparent)
+            )
+            .border(1.dp, if (selected) Color.Transparent else if (vi == vm.currentChannel()) colors.accentEnd else Color.Transparent, RoundedCornerShape(13.dp))
+            .zenFocusEffect(selected, focusEffect, RoundedCornerShape(13.dp))
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)
+    ) {
+        if (settings.epgLogos) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(Brush.horizontalGradient(channelArt(vi))),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(ch.code, fontSize = 10.sp, fontWeight = FontWeight.Black, color = if (selected) colors.background else Color.White)
+            }
+            Spacer(Modifier.width(0.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(ch.name, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = if (selected) colors.background else colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(prog?.t ?: "–", fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = if (selected) colors.background.copy(alpha = 0.72f) else colors.onSurface.copy(alpha = 0.55f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(ch.num.toString(), fontSize = 9.5.sp, fontWeight = FontWeight.Black, color = if (selected) colors.background.copy(alpha = 0.72f) else colors.onSurface.copy(alpha = 0.45f))
+        if (vm.isFav(vi)) {
+            Text("♥", fontSize = 10.sp, color = if (selected) colors.background else Color(0xFFFFD23F))
+        }
+    }
+}
+
+@Composable
+private fun ProgramGrid(
+    vm: EpgViewModel,
+    vis: List<Int>,
+    now: Int,
+    hScroll: androidx.compose.foundation.ScrollState,
+    listState: LazyListState,
+    rowH: Dp,
+    headerH: Dp,
+    timeColW: Dp,
+    totalW: Dp,
+    settings: ZenSettings,
+    colors: com.zenplayer.app.ui.theme.ZenColors,
+    modifier: Modifier,
+    onWidthChanged: (Int) -> Unit
+) {
     val nowLineX = remember(now, timeColW) { ((now - EPG_START).coerceAtLeast(0).toFloat() / 60f * timeColW.value).dp }
     val card = colors.surface.copy(alpha = 0.42f)
     val line = colors.onSurface.copy(alpha = 0.12f)
@@ -341,21 +463,43 @@ private fun ProgramGrid(vm: EpgViewModel, vis: List<Int>, now: Int, vScroll: and
             .clip(RoundedCornerShape(20.dp))
             .background(card)
             .border(1.dp, line, RoundedCornerShape(20.dp))
+            .onSizeChanged { onWidthChanged(it.width) }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(vScroll)
-                .horizontalScroll(hScroll)
-        ) {
-            TimeHeader(totalW, now, settings, colors)
-            vis.forEachIndexed { rowIdx, vi ->
-                ProgramRow(vm, vi, rowIdx, totalW, now, settings, colors)
+        Column(Modifier.fillMaxSize()) {
+            // Sticky time header: scrolls horizontally together with the programme rows
+            // through the single shared hScroll.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(headerH)
+                    .horizontalScroll(hScroll)
+            ) {
+                TimeHeader(totalW, now, settings, colors)
+            }
+            // Only the visible programme rows are composed (LazyColumn) — the full channel
+            // list is reachable without a hardcoded cap. Item pitch (rowH + 5) matches the
+            // channel column so both scroll in sync.
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                itemsIndexed(vis, key = { _, vi -> vi }) { rowIdx, vi ->
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(rowH + 5.dp)
+                            .horizontalScroll(hScroll)
+                    ) {
+                        ProgramRow(vm, vi, rowIdx, vis.size, totalW, now, settings, colors)
+                    }
+                }
             }
         }
         Box(
             modifier = Modifier
-                .padding(top = settings.scaledGridHeaderH())
+                .padding(top = headerH)
                 .width(2.dp)
                 .offset(x = nowLineX)
                 .fillMaxHeight()
@@ -395,7 +539,7 @@ private fun TimeHeader(totalW: Dp, now: Int, settings: ZenSettings, colors: com.
 }
 
 @Composable
-private fun ProgramRow(vm: EpgViewModel, vi: Int, rowIdx: Int, totalW: Dp, now: Int, settings: ZenSettings, colors: com.zenplayer.app.ui.theme.ZenColors) {
+private fun ProgramRow(vm: EpgViewModel, vi: Int, rowIdx: Int, rowCount: Int, totalW: Dp, now: Int, settings: ZenSettings, colors: com.zenplayer.app.ui.theme.ZenColors) {
     val progs = epgProgramsFor(vi, vm.day())
     val selected = rowIdx == vm.row
     val timeColW = settings.scaledTimeColW()
@@ -407,46 +551,71 @@ private fun ProgramRow(vm: EpgViewModel, vi: Int, rowIdx: Int, totalW: Dp, now: 
             .width(totalW)
             .height(chRowH + 5.dp)
             .drawBehind {
-                if (rowIdx < vm.currentVis().size - 1) {
+                if (rowIdx < rowCount - 1) {
                     drawLine(line, start = Offset(0f, size.height - 1.dp.toPx()), end = Offset(size.width, size.height - 1.dp.toPx()), strokeWidth = 1f, pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4f, 4f), 0f))
                 }
             }
     ) {
-        progs.forEachIndexed { idx, prog ->
-            val left = ((prog.s - EPG_START).toFloat() / 60f * timeColW.value).dp
-            val w = ((prog.e - prog.s).toFloat() / 60f * timeColW.value).dp - 4.dp
-            val isNow = prog.s <= now && prog.e > now
-            val focused = selected && idx == vm.ecol
-            val catName = programCategoryName(prog.c)
-            val pgNow = colors.accentStart.copy(alpha = 0.16f)
+        if (progs.isEmpty()) {
+            // Channel has no real EPG data for this day. Show an honest placeholder
+            // spanning the visible window instead of a fabricated schedule.
+            val w = ((EPG_END_MIN - EPG_START_MIN).toFloat() / 60f * timeColW.value).dp - 4.dp
             Box(
                 modifier = Modifier
-                    .offset(x = left, y = 5.dp)
+                    .offset(x = 0.dp, y = 5.dp)
                     .width(w.coerceAtLeast(4.dp))
                     .height(chRowH - 5.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        if (isNow) Brush.linearGradient(listOf(pgNow, Color.White.copy(alpha = 0.05f)))
-                        else Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.06f), Color.White.copy(alpha = 0.02f)))
-                    )
-                    .border(1.dp, if (isNow) colors.accentEnd else Color.White.copy(alpha = 0.07f), RoundedCornerShape(12.dp))
-                    .then(
-                        if (focused) Modifier.border(2.dp, colors.accentStart, RoundedCornerShape(12.dp))
-                            .background(Color.White.copy(alpha = 0.05f))
-                        else Modifier
-                    )
-                    .zenFocusEffect(focused, focusEffect, RoundedCornerShape(12.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .background(Color.White.copy(alpha = 0.03f))
+                    .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                contentAlignment = Alignment.CenterStart
             ) {
-                Column {
-                    Text("${hh(prog.s)}${if (w > 124.dp) " – ${hh(prog.e)}" else ""}", fontSize = 10.sp, color = colors.onSurface.copy(alpha = 0.45f), maxLines = 1)
-                    Text(prog.t, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (w > 170.dp) {
-                        Text(catName, fontSize = 9.5.sp, color = colors.onSurface.copy(alpha = 0.45f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    "Keine Programmdaten für diesen Sender",
+                    fontSize = 11.5.sp,
+                    color = colors.onSurface.copy(alpha = 0.38f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        } else {
+            progs.forEachIndexed { idx, prog ->
+                val left = ((prog.s - EPG_START).toFloat() / 60f * timeColW.value).dp
+                val w = ((prog.e - prog.s).toFloat() / 60f * timeColW.value).dp - 4.dp
+                val isNow = prog.s <= now && prog.e > now
+                val focused = selected && idx == vm.ecol
+                val catName = programCategoryName(prog.c)
+                val pgNow = colors.accentStart.copy(alpha = 0.16f)
+                Box(
+                    modifier = Modifier
+                        .offset(x = left, y = 5.dp)
+                        .width(w.coerceAtLeast(4.dp))
+                        .height(chRowH - 5.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            if (isNow) Brush.linearGradient(listOf(pgNow, Color.White.copy(alpha = 0.05f)))
+                            else Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.06f), Color.White.copy(alpha = 0.02f)))
+                        )
+                        .border(1.dp, if (isNow) colors.accentEnd else Color.White.copy(alpha = 0.07f), RoundedCornerShape(12.dp))
+                        .then(
+                            if (focused) Modifier.border(2.dp, colors.accentStart, RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                            else Modifier
+                        )
+                        .zenFocusEffect(focused, focusEffect, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Column {
+                        Text("${hh(prog.s)}${if (w > 124.dp) " – ${hh(prog.e)}" else ""}", fontSize = 10.sp, color = colors.onSurface.copy(alpha = 0.45f), maxLines = 1)
+                        Text(prog.t, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, color = colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (w > 170.dp) {
+                            Text(catName, fontSize = 9.5.sp, color = colors.onSurface.copy(alpha = 0.45f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
-                }
-                if (isNow) {
-                    NowProgressBar(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp), colors)
+                    if (isNow) {
+                        NowProgressBar(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp), colors)
+                    }
                 }
             }
         }

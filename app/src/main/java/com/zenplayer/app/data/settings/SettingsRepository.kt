@@ -44,9 +44,12 @@ data class ZenSettings(
     val playerEngine: PlayerEngineChoice = PlayerEngineChoice.EXO,
     val selectedProviderId: Long = -1L,
     val preferHd: Boolean = true,
-    val epgFavs: Set<Int> = setOf(0, 2, 4, 6),
+    val epgFavs: Set<Int> = emptySet(),
+    val epgRecent: List<String> = emptyList(),
     val epgDay: Int = 0,
     val epgFavsOnly: Boolean = false,
+    val epgRecentOnly: Boolean = false,
+    val epgCategoryGroup: String? = null,
     val epgAutoNow: Boolean = true,
     val epgPipp: Boolean = true,
     val epgLogos: Boolean = true,
@@ -83,8 +86,11 @@ class SettingsRepository(private val context: Context) {
         val SELECTED_PROVIDER = longPreferencesKey("selected_provider")
         val PREFER_HD = booleanPreferencesKey("prefer_hd")
         val EPG_FAVS = stringSetPreferencesKey("epg_favs")
+        val EPG_RECENT = stringPreferencesKey("epg_recent")
         val EPG_DAY = intPreferencesKey("epg_day")
         val EPG_FAVS_ONLY = booleanPreferencesKey("epg_favsonly")
+        val EPG_RECENT_ONLY = booleanPreferencesKey("epg_recentonly")
+        val EPG_CATEGORY = stringPreferencesKey("epg_category")
         val EPG_AUTO_NOW = booleanPreferencesKey("epg_autonow")
         val EPG_PIPP = booleanPreferencesKey("epg_pipp")
         val EPG_LOGOS = booleanPreferencesKey("epg_logos")
@@ -122,9 +128,12 @@ class SettingsRepository(private val context: Context) {
             selectedProviderId = prefs[Keys.SELECTED_PROVIDER] ?: -1L,
             preferHd = prefs[Keys.PREFER_HD] ?: true,
             epgFavs = prefs[Keys.EPG_FAVS]
-                ?.mapNotNull { it.toIntOrNull() }?.toSet() ?: setOf(0, 2, 4, 6),
+                ?.mapNotNull { it.toIntOrNull() }?.toSet() ?: emptySet(),
+            epgRecent = recentWatchDecode(prefs[Keys.EPG_RECENT]),
             epgDay = prefs[Keys.EPG_DAY] ?: 0,
             epgFavsOnly = prefs[Keys.EPG_FAVS_ONLY] ?: false,
+            epgRecentOnly = prefs[Keys.EPG_RECENT_ONLY] ?: false,
+            epgCategoryGroup = prefs[Keys.EPG_CATEGORY],
             epgAutoNow = prefs[Keys.EPG_AUTO_NOW] ?: true,
             epgPipp = prefs[Keys.EPG_PIPP] ?: true,
             epgLogos = prefs[Keys.EPG_LOGOS] ?: true,
@@ -228,12 +237,66 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Records a channel as "recently watched": read-modify-write inside ONE DataStore
+     * edit so rapid zapping cannot lose entries (edits are applied atomically in order).
+     * The recency list is deduplicated and capped by the pure [pushRecentWatch] logic.
+     */
+    suspend fun pushRecentChannel(key: String) {
+        context.zenDataStore.edit { prefs ->
+            val current = recentWatchDecode(prefs[Keys.EPG_RECENT])
+            if (current.firstOrNull() == key) return@edit
+            prefs[Keys.EPG_RECENT] = recentWatchEncode(pushRecentWatch(current, key))
+        }
+    }
+
+    suspend fun setEpgRecent(recent: List<String>) {
+        context.zenDataStore.edit {
+            it[Keys.EPG_RECENT] = recentWatchEncode(recent)
+        }
+    }
+
+    suspend fun setEpgRecentOnly(value: Boolean) {
+        context.zenDataStore.edit {
+            it[Keys.EPG_RECENT_ONLY] = value
+            if (value) it.remove(Keys.EPG_CATEGORY)
+        }
+    }
+
+    /**
+     * Sets exactly ONE active Guide group (mutually exclusive): "all", "favs" or
+     * "recent". Written in a single edit so the UI never observes a torn state.
+     * Any active provider category is cleared with it.
+     */
+    suspend fun setEpgActiveGroup(mode: String) {
+        context.zenDataStore.edit {
+            it[Keys.EPG_FAVS_ONLY] = mode == "favs"
+            it[Keys.EPG_RECENT_ONLY] = mode == "recent"
+            it.remove(Keys.EPG_CATEGORY)
+        }
+    }
+
+    /**
+     * Activates a single provider category group (mutually exclusive with the virtual
+     * groups "Favoriten"/"Zuletzt gesehen" — the flags are cleared in the same edit).
+     */
+    suspend fun setEpgCategoryGroup(category: String) {
+        context.zenDataStore.edit {
+            it[Keys.EPG_CATEGORY] = category
+            it[Keys.EPG_FAVS_ONLY] = false
+            it[Keys.EPG_RECENT_ONLY] = false
+        }
+    }
+
     suspend fun setEpgDay(day: Int) {
         context.zenDataStore.edit { it[Keys.EPG_DAY] = day }
     }
 
     suspend fun setEpgFavsOnly(value: Boolean) {
-        context.zenDataStore.edit { it[Keys.EPG_FAVS_ONLY] = value }
+        context.zenDataStore.edit {
+            it[Keys.EPG_FAVS_ONLY] = value
+            if (value) it.remove(Keys.EPG_CATEGORY)
+        }
     }
 
     suspend fun setEpgAutoNow(value: Boolean) {

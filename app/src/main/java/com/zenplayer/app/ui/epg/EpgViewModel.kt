@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.zenplayer.app.data.model.Channel
 import com.zenplayer.app.data.settings.ZenSettings
+import com.zenplayer.app.data.settings.recentOnlyVis
 import com.zenplayer.app.di.AppContainer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -61,6 +62,13 @@ class EpgViewModel(private val container: AppContainer) : ViewModel() {
     private var entFired = false
     private var entJob: Job? = null
 
+    /**
+     * Real database channel at grid position [vi]. The Guide hands this to the
+     * player so OK/play starts the actual provider stream — never a fabricated
+     * placeholder channel.
+     */
+    fun channelAt(vi: Int): Channel? = dbChannels.getOrNull(vi)
+
     init {
         val s = settings.value
         val vis = currentVis(s)
@@ -70,10 +78,11 @@ class EpgViewModel(private val container: AppContainer) : ViewModel() {
         }
         viewModelScope.launch {
             container.channels.allLiveChannels().collect { list ->
-                val limited = list.take(MAX_EPG_CHANNELS)
-                dbChannels = limited
+                // Full list, deliberately NOT capped (masterplan rule #4). The grid is
+                // virtualized; every provider channel stays reachable in the Guide.
+                dbChannels = list
                 val mapped = withContext(Dispatchers.Default) {
-                    limited.mapIndexed { i, ch -> mapDbChannel(ch, i) }
+                    list.mapIndexed { i, ch -> mapDbChannel(ch, i) }
                 }
                 EpgStore.updateChannels(mapped)
                 if (row == 0 && mapped.isNotEmpty()) {
@@ -120,8 +129,83 @@ class EpgViewModel(private val container: AppContainer) : ViewModel() {
 
     fun currentVis(s: ZenSettings = settings.value): List<Int> {
         val all = EPG_CHANNELS.indices.toList()
-        val filtered = if (!s.epgFavsOnly || s.epgFavs.isEmpty()) all else all.filter { it in s.epgFavs }
-        return filtered.take(MAX_EPG_CHANNELS)
+        // Exactly ONE group is active — the settings writers keep the flags and the
+        // provider category mutually exclusive. "Favoriten" with an empty favorites set
+        // shows the honest empty state instead of falling back to "all channels".
+        return when {
+            s.epgFavsOnly -> if (s.epgFavs.isEmpty()) emptyList() else all.filter { it in s.epgFavs }
+            s.epgCategoryGroup != null -> epgCategoryVis(s.epgCategoryGroup, dbChannels)
+            s.epgRecentOnly -> recentOnlyVis(s.epgRecent, dbChannels)
+            else -> all
+        }
+    }
+
+    /**
+     * Cycles the active Guide group: Alle Sender -> Favoriten -> Zuletzt gesehen -> every
+     * real provider category -> Alle. Empty virtual groups are skipped automatically, so on
+     * a fresh install the cycle goes straight into the provider categories. Exactly one
+     * group stays active; see [com.zenplayer.app.data.settings.SettingsRepository.setEpgActiveGroup]
+     * and [com.zenplayer.app.data.settings.SettingsRepository.setEpgCategoryGroup].
+     */
+    fun cycleGroup() {
+        val s = settings.value
+        val cats = epgCategories(dbChannels)
+        val next = epgNextGroup(
+            EpgGroupState(s.epgFavsOnly, s.epgRecentOnly, s.epgCategoryGroup),
+            cats,
+            includeFavs = s.epgFavs.isNotEmpty(),
+            includeRecent = s.epgRecent.isNotEmpty()
+        )
+        val nextName = epgGroupCategoryName(next)
+        val isCat = next.startsWith("cat:")
+        viewModelScope.launch {
+            when (next) {
+                "all" -> container.settings.setEpgActiveGroup("all")
+                "favs" -> container.settings.setEpgActiveGroup("favs")
+                "recent" -> container.settings.setEpgActiveGroup("recent")
+                else -> container.settings.setEpgCategoryGroup(nextName)
+            }
+        }
+        // Snap synchronously to the NEXT group's channel list; the settings flow updates
+        // asynchronously, so computing the target here from the current snapshot is exact.
+        val nextVis = when {
+            next == "favs" -> EPG_CHANNELS.indices.filter { it in s.epgFavs }
+            next == "recent" -> recentOnlyVis(s.epgRecent, dbChannels)
+            next == "all" -> EPG_CHANNELS.indices.toList()
+            else -> epgCategoryVis(nextName, dbChannels)
+        }
+        snapTo(nextVis)
+        toast(
+            when {
+                isCat -> "Kategorie: $nextName"
+                next == "favs" -> "Favoriten"
+                next == "recent" -> "Zuletzt gesehen"
+                else -> "Alle Sender"
+            } + " aktiv"
+        )
+    }
+
+    /** Human-readable label of the currently active Guide group. */
+    fun activeGroupLabel(): String = when {
+        settings.value.epgFavsOnly -> "Favoriten"
+        settings.value.epgRecentOnly -> "Zuletzt gesehen"
+        settings.value.epgCategoryGroup != null -> settings.value.epgCategoryGroup.orEmpty()
+        else -> "Alle Sender"
+    }
+
+    /**
+     * Re-anchors the selection for [vis]: the current channel is preferred if present,
+     * otherwise the first row; the programme column snaps to "now".
+     */
+    private fun snapTo(vis: List<Int>) {
+        if (vis.isEmpty()) {
+            row = 0
+            ecol = 0
+            return
+        }
+        val r = vis.indexOf(currentChannel())
+        row = if (r < 0) 0 else r
+        ecol = epgProgAt(vis[row], day(), nowMin)
     }
 
     fun day(): Int = settings.value.epgDay.coerceIn(0, EPG_DAY_SLOTS - 1)
@@ -231,7 +315,7 @@ class EpgViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun toggleFav(vi: Int) {
-        val cur = settings.value.epgFavs.ifEmpty { setOf(0, 2, 4, 6) }.toMutableSet()
+        val cur = settings.value.epgFavs.toMutableSet()
         val removed = cur.remove(vi)
         if (removed) {
             viewModelScope.launch { container.settings.setEpgFavs(cur) }
@@ -245,7 +329,16 @@ class EpgViewModel(private val container: AppContainer) : ViewModel() {
 
     fun toggleFavsOnly() {
         val next = !settings.value.epgFavsOnly
-        viewModelScope.launch { container.settings.setEpgFavsOnly(next) }
+        viewModelScope.launch {
+            container.settings.setEpgActiveGroup(if (next) "favs" else "all")
+        }
+        // Synchronous snap from the current snapshot (the settings flow is async).
+        val nextVis = if (next) {
+            EPG_CHANNELS.indices.filter { it in settings.value.epgFavs }
+        } else {
+            EPG_CHANNELS.indices.toList()
+        }
+        snapTo(nextVis)
     }
 
     private fun setCh(vi: Int) {

@@ -62,7 +62,7 @@ fun HomeScreen(onNavigate: (String) -> Unit) {
     val app = LocalContext.current.applicationContext as ZenPlayerApplication
     val providers by app.container.iptvRepo.providersFlow.collectAsStateWithLifecycle(initialValue = emptyList())
     val settings by app.container.settings.settingsFlow.collectAsStateWithLifecycle(initialValue = ZenSettings())
-    val favs = settings.epgFavs.ifEmpty { setOf(0, 2, 4, 6) }
+    val favs = settings.epgFavs
 
     when (homeStyle) {
         "kanal" -> KanalHome(settings, onNavigate)

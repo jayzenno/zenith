@@ -1,5 +1,124 @@
 # AI Collaboration Changelog
 
+## 2026-09-19 — DeepSeek Core-TV-Runde (Code-Change: Premium-Zap-Overlay — echte Kanalnummer + ehrliche Qualitäts-Badges, Gate #11)
+- `MODUS=core-tv`, `TO_DEEPSEEK.md` weiterhin nur Platzhalter → höchster noch nicht
+  vollständig erfüllter Gate-Punkt selbst gewählt: **Gate #11 „Live player has premium zap
+  overlay: logo, channel number, logical channel, Now/Next, progress, useful badges“** —
+  Logo/Now-Next/Fortschritt waren da, **Kanalnummer und nützliche Badges fehlten**.
+- Neu `ChannelQuality.kt` (pure, JVM-testbar): `channelQualityHint(name, url)` ⇒ 4K/FHD/
+  HD/SD nur aus **echten** Kanalname/URL-Daten, sonst `null` (Regel #2: niemals erfundene
+  Qualität; `_`-Normalisierung für „stream_1080p“-URLs — Bug im ersten Testlauf entdeckt).
+- `PlayerScreen`: Kanalnummer (`Channel.number > 0`, sonst Zap-Position) nur bei LIVE als
+  accent-Plakette in TopBar/Banner; Glass-`QualityBadge` neben LIVE-Chip nur bei ableitbarem
+  Wert; VOD/Music ohne Badge.
+- Guide-Nebenbefund (Priorität 3): Hinweis „◄ ► = Tag“ war falsch (Tag = PageUp/PageDown)
+  und „Pause = jetzt“ behauptete einen Shortcut, den es nicht gab — `snapNow()` war
+  ungebunden. Fix: `MediaPlayPause`/`MediaPlay` springen zu jetzt; Hinweis auf die echten
+  Tasten korrigiert.
+- Neu `ChannelQualityTest` +10 Tests; Gesamt **51 JVM-Unit-Tests grün** (`ChannelQuality`
+  10, `EpgData` 18, `RecentWatch` 9, `FallbackPolicy` 4, `PlaybackStatus` 4,
+  `PlayerDiagnostics` 6), `BUILD SUCCESSFUL` offline (`--rerun-tasks` real ausgeführt).
+  Kein Gerät/`adb` → keine Hardware-/Badge-Optik-Verifikation.
+- `DEEPSEEK_RESULT.md`/`TO_CLAUDE.md` aktualisiert; `STATE.md` bleibt
+  `ACTIVE_AGENT=CLAUDE` (war zu Rundenbeginn bereits so — Claude-Review der Vorrunden steht
+  noch aus; LAST_COMPLETED_AGENT=DEEPSEEK ist korrekt).
+
+## 2026-09-19 — DeepSeek Core-TV-Runde (Code-Change: Anbieter-Kategorien im Guide, Gate #7 + ehrliche Favoriten)
+- `MODUS=core-tv`, `TO_DEEPSEEK.md` weiterhin nur Platzhalter → höchster unerfüllter
+  Gate-Punkt selbst gewählt: **Gate #7 „All provider categories/groups are reachable
+  from Live TV and Guide“** — Live-TV erreichte Kategorien bereits
+  (`MediaListViewModel.rows` → `GridRow`s), aber der Guide zyklte über `G` nur durch
+  Alle/Favoriten/Zuletzt gesehen: **keine Anbieter-Kategorie war im TV-Programm
+  erreichbar**.
+- Nebenbefund (Regel #2): Favoriten-Seed `setOf(0, 2, 4, 6)` in `ZenSettings`-Default,
+  DataStore-Fallback, `toggleFav` und Home-Reihe fabrizierte Favoriten (♥/Reihe/Gruppe
+  mit erfundenen Sendern) — entfernt, Favoriten sind ab jetzt daten-ehrlich.
+- Neu in `EpgData.kt` (pure, JVM-testbar): `epgCategories` (distinct, nicht-blank,
+  Playlist-Reihenfolge), `epgCategoryVis` (exakte globale Indizes), `epgGroupCycle` +
+  `epgNextGroup` (Zyklus `all → favs → recent → cat0..catN → all`; `cat:`-Präfix gegen
+  Kollisionen; Skip leerer virtueller Gruppen; verschwundene Kategorie fällt auf `all`
+  zurück), `epgGroupCategoryName` (Roundtrip), `EpgGroupState`.
+- `SettingsRepository`: `ZenSettings.epgCategoryGroup` + Key `epg_category`,
+  `setEpgCategoryGroup(cat)` als exklusiver Gruppen-Setter; `setEpgActiveGroup`/Low-
+  Level-Setter löschen die Kategorie → „genau EINE aktive Gruppe“ über alle Pfade.
+- `EpgViewModel`: `currentVis` mit Kategorienzweig, `cycleGroup` über Kategorien mit
+  Toast „Kategorie: X aktiv“, `activeGroupLabel`, `toggleFav` ohne Seed. `EpgScreen`:
+  Empty-State-Untertitel für leere Kategorie. `HomeScreen`: Favoritenreihe ohne Seed.
+- Neu `EpgDataTest` +7 Tests (Klasse jetzt 18); Gesamt 41 JVM-Unit-Tests grün
+  (`EpgDataTest` 18, `RecentWatchTest` 9, `FallbackPolicyTest` 4,
+  `PlaybackStatusTest` 4, `PlayerDiagnosticsTest` 6), `BUILD SUCCESSFUL` offline
+  (Windows-JVM, 15 s, 45 Tasks, `--rerun-tasks` real ausgeführt). Kein Gerät/`adb` →
+  keine Hardware-/D-Pad-Verifikation.
+- `DEEPSEEK_RESULT.md`/`TO_CLAUDE.md` aktualisiert; `STATE.md` bleibt
+  `ACTIVE_AGENT=CLAUDE` (war zu Rundenbeginn bereits so — Claude-Review der Vorrunden
+  steht noch aus; LAST_COMPLETED_AGENT=DEEPSEEK ist korrekt).
+
+## 2026-09-19 — DeepSeek Core-TV-Runde (Code-Change: „Zuletzt gesehen“ als First-Class-Gruppe)
+- `MODUS=core-tv`, `TO_DEEPSEEK.md` weiterhin nur Platzhalter (Claude-Review war
+  permissions-blockiert) → höchster unerfüllter Gate-Punkt selbst gewählt:
+  **Gate #8 „Favorites, All Channels and Recently Watched exist as first-class
+  virtual groups“** — Favoriten/„Alle Sender“ existierten, „Zuletzt gesehen“ fehlte
+  komplett (keine Wiedergabe-Historie), und der Guide hatte keinen Gruppenumschalter.
+- Neu `data/settings/RecentWatch.kt`: pure, JVM-testbare Recency-Logik
+  (`recentWatchKey` provider-gescopt, `pushRecentWatch` Dedupe/Move-to-Front/Cap 24,
+  `recentWatchDecode/Encode`, `recentOnlyVis` überspringt unbekannte/gelöschte Kanäle).
+- `SettingsRepository`: `ZenSettings.epgRecent`/`epgRecentOnly`, Keys `epg_recent`/
+  `epg_recentonly`, `pushRecentChannel()` als atomarer Read-Modify-Write (Zap-Rennen
+  sicher), `setEpgActiveGroup()` setzt exakt EINE Gruppe in einem Edit (kein Torn-State).
+- `PlayerScreen`: Tune von LIVE-Kanälen (`providerId >= 0`) schreibt in die Historie —
+  ein Funnel für alle Einstiege (Guide/Live-TV/Home); VOD/Music bewusst nicht.
+- `EpgScreen`: `Key.G` Gruppenschleife (Alle Sender → Favoriten → Zuletzt gesehen),
+  Spalten-Header zeigt aktive Gruppe + ehrliche Zählung, Empty-States pro Gruppe,
+  Hint „G = Gruppe“. `EpgViewModel`: `cycleGroup()`/`snapTo()` re-anchorn synchron
+  (Settings-Flow async), `toggleFavsOnly` (VM + `SettingsViewModel`) → exklusive
+  Gruppen über `setEpgActiveGroup`.
+- Neu `RecentWatchTest` 9 JVM-Tests; Gesamt 34 Tests grün (`RecentWatchTest` 9,
+  `EpgDataTest` 11, `FallbackPolicyTest` 4, `PlaybackStatusTest` 4,
+  `PlayerDiagnosticsTest` 6), `BUILD SUCCESSFUL` offline (`--rerun-tasks`, 23 s).
+  Kein Gerät/`adb` → keine Hardware-/D-Pad-Verifikation.
+- `DEEPSEEK_RESULT.md`/`TO_CLAUDE.md` aktualisiert, `STATE.md` = `ACTIVE_AGENT=CLAUDE`.
+
+## 2026-09-19 — DeepSeek Core-TV-Runde (Code-Change: EPG-Grid virtualisiert, Focus-Follow, kein Silent-Truncation)
+- `MODUS=core-tv`, `TO_DEEPSEEK.md` war Platzhalter → höchste offene Gate-Punkte
+  selbst gewählt, beide hingen an der fehlenden Grid-Virtualisierung:
+  - Gate „Focus is always visible and scrolls the grid“ (vorher kein Auto-Scroll,
+    Auswahl lief nach ~10 Schritten aus dem Bild).
+  - Gate #9 / Regel #4 „No silent truncation“ (`MAX_EPG_CHANNELS=200` kappte
+    stillschweigend; Kanal 201+ unerreichbar).
+- `EpgScreen.kt`: Programm-Grid + Kanalspalte auf `LazyColumn` umgestellt (nur
+  sichtbare Zeilen werden komponiert); Kanalspalte folgt über
+  `snapshotFlow(firstVisibleItemIndex/ScrollOffset) → scrollToItem` bei identischem
+  Zeilen-Pitch; horizontale Achse über einen gemeinsamen `hScroll` (sticky
+  Time-Header + alle Zeilen, bewährtes Shared-`ScrollState`-Muster).
+- Vertikaler Focus-Follow: `animateScrollToItem(vm.row)`; horizontaler Focus-Follow:
+  `animateScrollTo(epgScrollTargetX(...))` (Grid-Breite via `onSizeChanged`).
+- `EpgData.kt`: `MAX_EPG_CHANNELS` entfernt; neue pure Funktion
+  `epgScrollTargetX()` (JVM-testbar). `EpgViewModel.kt`: beide `take(...)` entfernt.
+- Ehrliche Kanalzahlen in der Kanalspalte („X von N“ bei Filter, sonst volle Zahl).
+- Neu `EpgDataTest` +3 Tests (`epgScrollTargetX`); Gesamt 25 JVM-Unit-Tests grün
+  (`EpgDataTest` 11, `FallbackPolicyTest` 4, `PlaybackStatusTest` 4,
+  `PlayerDiagnosticsTest` 6), `BUILD SUCCESSFUL` offline (`--rerun-tasks` real
+  ausgeführt, 20 s). Kein Gerät/`adb` → keine Hardware-/Scroll-Verifikation.
+- `DEEPSEEK_RESULT.md`/`TO_CLAUDE.md` aktualisiert, `STATE.md` = `ACTIVE_AGENT=CLAUDE`.
+
+## 2026-09-19 — DeepSeek Core-TV-Runde (Code-Change: Guide zeigt nur noch echte Anbieterdaten)
+- `MODUS=core-tv`, `TO_DEEPSEEK.md` war Platzhalter → höchster unerfüllter Gate-Punkt
+  selbst gewählt: **Gate #2 / Regel #2 (keine Fake-Daten in Produktion)**.
+- `EpgData.kt`: `EPG_CHANNELS` startet leer (26 Demo-Sender entfernt), `epgProgramsFor()`
+  liefert nur echte gespeicherte Daten — komplette Mock-Maschinerie gelöscht (−143/+11).
+- `EpgScreen.kt`: ehrliche Empty-States (kein Sender / „Keine Programmdaten für diesen
+  Sender“). `buildEpgChannel` entfernt — der Guide startet jetzt über den echten
+  DB-Kanal (`EpgViewModel.channelAt(vi)`).
+- `PlayerScreen.kt`: „JETZT/DANACH“-Lookup über die EPG-Identität `extra ?: id`
+  (konsistent zum Guide), statt URL-DB-Id → funktioniert für M3U tvg-id / Xtream
+  epg_channel_id.
+- Behobener Nebenbefund (Priorität-1-Playback-Fehler): OK im Guide führte vorher zu
+  `player/-1/LIVE/epg_…` → leerer schwarzer Player (fabricated Channel).
+- Neu `EpgDataTest.kt` (8 Tests); Gesamt 22 JVM-Unit-Tests grün, `BUILD SUCCESSFUL`
+  offline (Windows-JVM, 29 s, `--rerun-tasks` real ausgeführt). Kein Gerät/`adb` →
+  keine Hardware-/Stream-Verifikation.
+- `DEEPSEEK_RESULT.md`/`TO_CLAUDE.md` aktualisiert, `STATE.md` = `ACTIVE_AGENT=CLAUDE`.
+
 ## 2026-09-19 — DeepSeek Improve-Runde (Code-Change: Lifecycle-Pause bei App-Stopp)
 - Offener Handoff aus `claude-r3.log` gelöst (Priorität 3, Lifecycle/Stabilität):
   Bei HOME/Input-Switch/Bildschirm-aus spielten ExoPlayer/VLC unbegrenzt im Hintergrund
