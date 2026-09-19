@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-AI_TEAM_VERSION="1.6.0"
+AI_TEAM_VERSION="1.6.1"
 
 case "${1:-}" in
   --version|-V|version|check)
@@ -57,7 +57,7 @@ fi
 START_COMMIT="$(git rev-parse HEAD)"
 
 is_quota_error() {
-  grep -Eiq 'rate.?limit|usage.?limit|quota|credits?.*(exhaust|limit)|limit.*(reached|exceeded)|too many requests|429|resets? (at|in)|out of.*(tokens|credits)|capacity.*limit' "$1"
+  grep -Eiq 'rate.?limit|usage.?limit|quota|credits?.*(exhaust|limit)|limit.*(reached|exceeded)|too many requests|429|resets? (at|in)|out of.*(tokens|credits)|capacity.*limit|session.?limit|hit your session limit|resets? [0-9].*(am|pm)' "$1"
 }
 
 mark_unavailable() {
