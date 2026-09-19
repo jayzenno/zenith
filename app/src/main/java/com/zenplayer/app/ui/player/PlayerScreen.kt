@@ -65,6 +65,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
@@ -112,6 +115,21 @@ fun PlayerScreen(
     }
     DisposableEffect(session) {
         onDispose { session.release() }
+    }
+
+    // Pause playback when the Activity stops (HOME on TV, input switch, screen off).
+    // Without this the engine would keep playing audio/video in the background
+    // indefinitely. Deliberately no auto-resume: the user resumes manually (OK).
+    // ON_STOP (not ON_PAUSE): on TV there is no multi-window/PIP, and ON_STOP is the
+    // exact boundary where the app is no longer visible. Both ExoPlayer and VLC are
+    // safe to pause while idle/loading.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, session) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) session.pause()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val status by session.status.collectAsStateWithLifecycle()

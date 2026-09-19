@@ -20,6 +20,30 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 private const val TAG = "ZenSession"
 
+private const val PROGRESS_POLL_MS = 500L
+
+/**
+ * True while the stream position is actually advancing. The session only polls the
+ * engines for progress in these states; everywhere else it freezes the last known value.
+ */
+val PlaybackStatus.progressLive: Boolean
+    get() = this is PlaybackStatus.Playing || this is PlaybackStatus.Buffering
+
+/**
+ * True once an engine has reached a stable post-start state: usable playback — even if
+ * paused by the user or the system (lifecycle) — or a terminal failure.
+ *
+ * [PlaybackStatus.Paused] counts as settled so the start watchdog neither declares a bogus
+ * timeout nor starts a background fallback when playback was paused while still starting
+ * (e.g. HOME pressed during tune-in). The engines emit Paused only from a genuinely
+ * usable state (Exo: STATE_READY + playWhenReady=false; VLC: pause event), so no real
+ * failure is masked.
+ */
+fun PlaybackStatus.settledAfterStart(): Boolean =
+    this is PlaybackStatus.Playing || this is PlaybackStatus.Ready ||
+        this is PlaybackStatus.Paused || this is PlaybackStatus.Error ||
+        this is PlaybackStatus.Ended
+
 data class PlaybackProgress(val positionMs: Long, val durationMs: Long)
 
 /**
@@ -120,14 +144,11 @@ class ZenPlayerSession(
         if (controller !== active) return
         watchdog = scope.launch {
             val settled = withTimeoutOrNull(PlayerDefaults.START_TIMEOUT_MS) {
-                controller.status.first {
-                    it is PlaybackStatus.Playing || it is PlaybackStatus.Ready ||
-                        it is PlaybackStatus.Error || it is PlaybackStatus.Ended
-                }
+                controller.status.first { it.settledAfterStart() }
             }
             if (controller !== active) return@launch
             when (settled) {
-                is PlaybackStatus.Playing, is PlaybackStatus.Ready,
+                is PlaybackStatus.Playing, is PlaybackStatus.Ready, is PlaybackStatus.Paused,
                 is PlaybackStatus.Error, is PlaybackStatus.Ended -> Unit
 
                 else -> {
@@ -167,13 +188,26 @@ class ZenPlayerSession(
     private fun startTicker() {
         ticker = scope.launch {
             while (isActive) {
-                _progress.value = PlaybackProgress(
-                    active.positionMs().coerceAtLeast(0L),
-                    active.durationMs().coerceAtLeast(0L)
-                )
-                delay(500L)
+                // Only poll the engines while the stream is actually progressing
+                // (initial load, retry, pause, error etc. keep the last known value —
+                // startStream()/switchToFallback() reset it to 0 explicitly).
+                if (_status.value.progressLive) {
+                    _progress.value = pollProgress()
+                }
+                delay(PROGRESS_POLL_MS)
             }
         }
+    }
+
+    private fun pollProgress(): PlaybackProgress = PlaybackProgress(
+        active.positionMs().coerceAtLeast(0L),
+        active.durationMs().coerceAtLeast(0L)
+    )
+
+    private fun snapProgress() {
+        // Reflect a seek immediately even while the ticker is frozen (e.g. paused VOD):
+        // StateFlow drops duplicate values, so this is a no-op during playback.
+        _progress.value = pollProgress()
     }
 
     fun videoView(hostContext: Context): View = when (val controller = active) {
@@ -185,7 +219,10 @@ class ZenPlayerSession(
     override fun toggle() = active.toggle()
     override fun pause() = active.pause()
     override fun resume() = active.resume()
-    override fun seekBy(deltaMs: Long) = active.seekBy(deltaMs)
+    override fun seekBy(deltaMs: Long) {
+        active.seekBy(deltaMs)
+        snapProgress()
+    }
     override fun positionMs(): Long = active.positionMs()
     override fun durationMs(): Long = active.durationMs()
 

@@ -3,7 +3,6 @@ package com.zenplayer.app.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,13 +56,12 @@ fun ZenChip(
         .clip(ZenShapes.pill)
         .background(bg)
         .zenFocusEffect(focused, focusEffect, ZenShapes.pill)
+        .onFocusChanged { focused = it.isFocused && it.hasFocus }
         .clickable(
             interactionSource = remember { MutableInteractionSource() },
             indication = null,
             onClick = onClick
         )
-        .focusable()
-        .onFocusChanged { focused = it.isFocused && it.hasFocus }
     if (width > 0) m = m.width(width.dp)
     if (height > 0) m = m.height(height.dp)
     Box(

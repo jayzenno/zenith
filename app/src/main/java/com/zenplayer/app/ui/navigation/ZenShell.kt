@@ -8,7 +8,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -506,13 +505,12 @@ private fun NavItemBox(
             .clip(RoundedCornerShape(16.dp))
             .then(if (bg != null) Modifier.background(bg) else Modifier.background(Color.Transparent))
             .zenFocusEffect(focused, focusEffect, RoundedCornerShape(16.dp))
+            .onFocusChanged { focused = it.isFocused && it.hasFocus }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = { onNavigate(route) }
-            )
-            .focusable()
-            .onFocusChanged { focused = it.isFocused && it.hasFocus },
+            ),
         contentAlignment = Alignment.Center
     ) {
         if (showLabel) {

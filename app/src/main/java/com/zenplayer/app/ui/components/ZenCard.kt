@@ -4,7 +4,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -49,13 +48,15 @@ fun ZenCard(
                 this.scaleY = scale
             }
             .zenFocusEffect(focused, focusEffect, shape)
+            // onFocusChanged must precede the focus target (clickable) in the modifier chain:
+            // focus events propagate outward from the active FocusTargetNode and stop at the
+            // next outer FocusTarget. One focus target per element (clickable provides it).
+            .onFocusChanged { state -> focused = state.isFocused && state.hasFocus }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
             )
-            .focusable()
-            .onFocusChanged { state -> focused = state.isFocused && state.hasFocus }
     ) {
         when (cardStyle) {
             "grad" -> Box(Modifier.matchParentSize().clip(shape).background(colors.accentBrush))
