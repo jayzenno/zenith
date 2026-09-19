@@ -29,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -51,9 +52,10 @@ import com.zenplayer.app.data.settings.ZenSettings
 import com.zenplayer.app.ui.components.EmptyState
 import com.zenplayer.app.ui.components.ZenCard
 import com.zenplayer.app.ui.epg.EpgChannel
+import com.zenplayer.app.ui.epg.EpgProgram
+import com.zenplayer.app.ui.epg.effectiveDay
 import com.zenplayer.app.ui.epg.mapDbChannel
 import com.zenplayer.app.ui.epg.nowMin
-import com.zenplayer.app.ui.epg.nowProg
 import com.zenplayer.app.ui.player.channelQualityHint
 import com.zenplayer.app.ui.theme.LocalHomeStyle
 import com.zenplayer.app.ui.theme.LocalZenColors
@@ -85,9 +87,37 @@ fun HomeScreen(onNavigate: (String) -> Unit) {
     // name-based art/code. Pure derivation from REAL channel data.
     val epg: List<EpgChannel> = remember(channels) { channels.mapIndexed { i, ch -> mapDbChannel(ch, i) } }
 
+    // Home "Jetzt LIVE" is read directly from Room (EpgRepository), NOT from the Guide's
+    // in-memory EpgStore: real provider programmes show as soon as an EPG sync has stored
+    // them, without requiring a prior Guide visit. The window day mirrors effectiveDay
+    // (before 05:00 the running programme lives in the previous broadcast window — the same
+    // rule the Guide applies), and the re-active flow re-emits on every EPG sync/prune.
+    val now = nowMin()
+    val day = effectiveDay(0, now)
+    val dbPrograms by app.container.epg.programsForWindowFlow(day)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val nowProgs: Map<Int, EpgProgram> = remember(channels, dbPrograms, now) {
+        homeNowPrograms(dbPrograms, channels, day, now)
+    }
+
+    // Demand-driven one-time EPG sync: the Home historically had no data at all until the
+    // Guide was visited (its ViewModel was the only sync trigger). Now the Home binds to
+    // Room directly, so when today's window is still empty and channels exist, we start the
+    // real provider EPG syncs here. Re-invoked only when the emptiness state flips (the
+    // Room flow re-emits on sync), so a returning user never re-syncs needlessly.
+    LaunchedEffect(dbPrograms.isEmpty() && channels.isNotEmpty()) {
+        if (dbPrograms.isEmpty() && channels.isNotEmpty()) {
+            runCatching {
+                app.container.iptvRepo.providers().forEach { provider ->
+                    app.container.iptvRepo.syncEpg(provider)
+                }
+            }
+        }
+    }
+
     when (homeStyle) {
-        "kanal" -> KanalHome(channels, epg, onNavigate)
-        else -> HubHome(channels, epg, settings, onNavigate, colors, preset)
+        "kanal" -> KanalHome(channels, epg, nowProgs, onNavigate)
+        else -> HubHome(channels, epg, nowProgs, settings, onNavigate, colors, preset)
     }
 }
 
@@ -95,6 +125,7 @@ fun HomeScreen(onNavigate: (String) -> Unit) {
 private fun HubHome(
     channels: List<Channel>,
     epg: List<EpgChannel>,
+    nowProgs: Map<Int, EpgProgram>,
     settings: ZenSettings,
     onNavigate: (String) -> Unit,
     colors: ZenColors,
@@ -108,24 +139,29 @@ private fun HubHome(
             .verticalScroll(scroll)
             .padding(horizontal = 28.dp, vertical = 26.dp)
     ) {
-        HeroBanner(channels, epg, settings, onNavigate, colors, preset)
+        HeroBanner(channels, epg, nowProgs, settings, onNavigate, colors, preset)
         if (channels.isEmpty()) return@Column
         Spacer(Modifier.height(26.dp))
         if (favs.isNotEmpty()) {
             SectionTitle("Deine Favoriten", "Zum Live-TV", colors)
             Spacer(Modifier.height(12.dp))
-            FavRow(channels, epg, favs, onNavigate, colors)
+            FavRow(channels, epg, nowProgs, favs, onNavigate, colors)
             Spacer(Modifier.height(26.dp))
         }
         SectionTitle("Jetzt LIVE", "Sender", colors)
         Spacer(Modifier.height(12.dp))
-        LiveTileRow(channels, epg, onNavigate, colors)
+        LiveTileRow(channels, epg, nowProgs, onNavigate, colors)
         Spacer(Modifier.height(40.dp))
     }
 }
 
 @Composable
-private fun KanalHome(channels: List<Channel>, epg: List<EpgChannel>, onNavigate: (String) -> Unit) {
+private fun KanalHome(
+    channels: List<Channel>,
+    epg: List<EpgChannel>,
+    nowProgs: Map<Int, EpgProgram>,
+    onNavigate: (String) -> Unit
+) {
     val colors = LocalZenColors.current
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 26.dp),
@@ -151,7 +187,7 @@ private fun KanalHome(channels: List<Channel>, epg: List<EpgChannel>, onNavigate
                 // The display mapping is derived from the same real channel; getOrNull only
                 // covers a stale index while the flow refreshes (e.g. provider re-sync).
                 val ec = epg.getOrNull(vi) ?: mapDbChannel(ch, vi)
-                val prog = nowProg(vi, 0, nowMin())
+                val prog = nowProgs[vi]
                 ZenCard(
                     onClick = { onNavigate(playRoute(ch)) },
                     modifier = Modifier.fillMaxWidth().height(80.dp),
@@ -194,6 +230,7 @@ private fun KanalHome(channels: List<Channel>, epg: List<EpgChannel>, onNavigate
 private fun HeroBanner(
     channels: List<Channel>,
     epg: List<EpgChannel>,
+    nowProgs: Map<Int, EpgProgram>,
     settings: ZenSettings,
     onNavigate: (String) -> Unit,
     colors: ZenColors,
@@ -203,7 +240,7 @@ private fun HeroBanner(
     val heroIdx = homeHeroIndex(channels, settings.epgFavs, settings.epgRecent)
     val heroCh = heroIdx?.let { channels.getOrNull(it) }
     val heroEpg = heroIdx?.let { epg.getOrNull(it) }
-    val prog = heroIdx?.let { nowProg(it, 0, nowMin()) }
+    val prog = heroIdx?.let { nowProgs[it] }
 
     Box(
         modifier = Modifier
@@ -374,13 +411,14 @@ private fun QualityChip(quality: String, colors: ZenColors) {
 private fun FavRow(
     channels: List<Channel>,
     epg: List<EpgChannel>,
+    nowProgs: Map<Int, EpgProgram>,
     favs: Set<Int>,
     onNavigate: (String) -> Unit,
     colors: ZenColors
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         favs.filter { it in channels.indices }.take(4).forEach { vi ->
-            FavCard(channels[vi], epg.getOrNull(vi), vi, onNavigate, Modifier.weight(1f), colors)
+            FavCard(channels[vi], epg.getOrNull(vi), vi, nowProgs, onNavigate, Modifier.weight(1f), colors)
         }
     }
 }
@@ -390,11 +428,12 @@ private fun FavCard(
     ch: Channel,
     ec: EpgChannel?,
     vi: Int,
+    nowProgs: Map<Int, EpgProgram>,
     onNavigate: (String) -> Unit,
     modifier: Modifier,
     colors: ZenColors
 ) {
-    val prog = nowProg(vi, 0, nowMin())
+    val prog = nowProgs[vi]
     ZenCard(
         onClick = { onNavigate(playRoute(ch)) },
         modifier = modifier.height(104.dp),
@@ -434,12 +473,13 @@ private fun FavCard(
 private fun LiveTileRow(
     channels: List<Channel>,
     epg: List<EpgChannel>,
+    nowProgs: Map<Int, EpgProgram>,
     onNavigate: (String) -> Unit,
     colors: ZenColors
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         channels.take(4).forEachIndexed { i, ch ->
-            LiveTile(ch, epg.getOrNull(i), i, onNavigate, Modifier.weight(1f), colors)
+            LiveTile(ch, epg.getOrNull(i), i, nowProgs, onNavigate, Modifier.weight(1f), colors)
         }
     }
 }
@@ -449,11 +489,12 @@ private fun LiveTile(
     ch: Channel,
     ec: EpgChannel?,
     vi: Int,
+    nowProgs: Map<Int, EpgProgram>,
     onNavigate: (String) -> Unit,
     modifier: Modifier,
     colors: ZenColors
 ) {
-    val prog = nowProg(vi, 0, nowMin())
+    val prog = nowProgs[vi]
     ZenCard(
         onClick = { onNavigate(playRoute(ch)) },
         modifier = modifier.height(116.dp),

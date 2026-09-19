@@ -85,10 +85,35 @@ object EpgStore {
  */
 fun epgProgramsFor(vi: Int, day: Int): List<EpgProgram> = EpgStore.programsFor(vi, day)
 
+/**
+ * Maps a WALL-CLOCK minute (minutes since local midnight, as [nowMin] returns) onto the
+ * grid slot basis: 05:00–23:59 map 1:1 (300–1439), the early-morning 00:00–04:59 of the
+ * window's last day occupies the tail of the same 24-column grid (1440–1739) — exactly
+ * the inverse of [wallClockSlot]. Pure and JVM-testable; must stay consistent with
+ * `mapDbPrograms` so "now" always lands on the running programme.
+ */
+fun wallClockToSlot(min: Int): Int = if (min < EPG_START_MIN) min + 24 * 60 else min
+
+/**
+ * The effective display day whose local 05:00–05:00 window CONTAINS the wall-clock minute
+ * [now]. Before 05:00 (00:00–04:59) the current moment belongs to the previous broadcast
+ * day, so a preference day [pref] is shifted back by one — otherwise the Guide could never
+ * open "around now" in the early morning (and the tail slots 1440–1739 would show
+ * tomorrow's, not today's, programmes). Pure and JVM-testable.
+ */
+fun effectiveDay(pref: Int, now: Int): Int = if (now < EPG_START_MIN) pref - 1 else pref
+
+/**
+ * Index of the last programme with `s <= [min]` ([min] in WALL-CLOCK minutes, the same
+ * basis [nowMin] and the Guide's clock use). The comparison runs in slot basis via
+ * [wallClockToSlot], so during 00:00–04:59 the running early-morning programme (slot
+ * 1440–1739) is selected instead of falling back to the first 05:00 programme.
+ */
 fun epgProgAt(vi: Int, day: Int, min: Int): Int {
     val a = epgProgramsFor(vi, day)
+    val minSlot = wallClockToSlot(min)
     var b = 0
-    for (idx in a.indices) if (a[idx].s <= min) b = idx
+    for (idx in a.indices) if (a[idx].s <= minSlot) b = idx
     return b
 }
 

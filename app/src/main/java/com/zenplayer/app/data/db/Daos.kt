@@ -85,6 +85,14 @@ interface EpgDao {
     @Query("SELECT * FROM epg_programs WHERE startTs < :dayEnd AND endTs > :dayStart ORDER BY channelId ASC, startTs ASC")
     suspend fun getForWindow(dayStart: Long, dayEnd: Long): List<EpgProgramEntity>
 
+    /**
+     * Reactive variant of [getForWindow]: emits whenever the EPG table changes (sync, prunes,
+     * provider re-sync). The Home screen subscribes to this instead of the Guide's in-memory
+     * store, so its "Jetzt LIVE" rows/Hero show real programmes without a prior Guide visit.
+     */
+    @Query("SELECT * FROM epg_programs WHERE startTs < :dayEnd AND endTs > :dayStart ORDER BY channelId ASC, startTs ASC")
+    fun observeForWindow(dayStart: Long, dayEnd: Long): Flow<List<EpgProgramEntity>>
+
     @Query("DELETE FROM epg_programs")
     suspend fun clearAll()
 

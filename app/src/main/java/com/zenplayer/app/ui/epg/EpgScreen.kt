@@ -454,7 +454,11 @@ private fun ProgramGrid(
     modifier: Modifier,
     onWidthChanged: (Int) -> Unit
 ) {
-    val nowLineX = remember(now, timeColW) { ((now - EPG_START).coerceAtLeast(0).toFloat() / 60f * timeColW.value).dp }
+    // Live "now" line on the shared slot basis. `now` is wall-clock minutes; before 05:00
+    // (00:00–04:59) wallClockToSlot maps it onto the tail columns of the displayed
+    // 05:00–05:00 grid — otherwise the line would sit at the left edge while the header
+    // highlights the real current-hour column.
+    val nowLineX = remember(now, timeColW) { ((wallClockToSlot(now) - EPG_START).coerceAtLeast(0).toFloat() / 60f * timeColW.value).dp }
     val card = colors.surface.copy(alpha = 0.42f)
     val line = colors.onSurface.copy(alpha = 0.12f)
 
@@ -583,7 +587,10 @@ private fun ProgramRow(vm: EpgViewModel, vi: Int, rowIdx: Int, rowCount: Int, to
             progs.forEachIndexed { idx, prog ->
                 val left = ((prog.s - EPG_START).toFloat() / 60f * timeColW.value).dp
                 val w = ((prog.e - prog.s).toFloat() / 60f * timeColW.value).dp - 4.dp
-                val isNow = prog.s <= now && prog.e > now
+                // `now` is wall-clock minutes; the slot comparison must use the same basis
+                // (early-morning programmes live in the 1440–1739 tail, see wallClockToSlot).
+                val nowSlot = wallClockToSlot(now)
+                val isNow = prog.s <= nowSlot && prog.e > nowSlot
                 val focused = selected && idx == vm.ecol
                 val catName = programCategoryName(prog.c)
                 val pgNow = colors.accentStart.copy(alpha = 0.16f)

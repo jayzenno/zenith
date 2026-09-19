@@ -1,5 +1,29 @@
 # AI Collaboration Changelog
 
+## 2026-09-19 — ⚠ Parallele Implementer-Session im selben Working Tree (Home←EpgRepository-Bindung)
+- Eine zweite `opencode run --agent implementer`-Session (PID 22402, 14:52) schrieb während
+  dieser Runde zusätzliche uncommittete Dateien: `Daos.kt` (`observeForWindow`), `EpgRepository.kt`
+  (`programsForWindowFlow`), `HomeData.kt` (`homeNowPrograms`) — bekannte Folgepunkt-Bindung.
+- Diese Dateien kamen NACH dem frischen Build (15:00) — nicht compiliert/getestet; HomeScreen
+  ist noch nicht umgehängt (Mitte der Arbeit). Keine von mir erzeugten Dateien wurden überschrieben.
+- Beide Sessions laufen noch; der Gesamt-Working-Tree (12 uncommittete Dateien) gehört gemeinsam
+  in den nächsten Claude-Review. Keine destruktive Aktion; kein Commit/Push/Reset.
+
+## 2026-09-19 — Core-TV: EPG-„Now“-Konsumenten auf Slot-Basis + effektiver Anzeige-Tag vor 05:00
+- Befund: Die Slot-Erzeugung war seit Runde 4/6 korrekt, aber die „Now“-Konsumenten
+  verglichen 00:00–04:59 (Wanduhr-Minuten 0–299) roh gegen Slots ≥ 300 → laufendes
+  Morgenprogramm lag im Grid-Tail (1440–1739), „JETZT“ zeigte aber das erste 05:00-Programm,
+  die Now-Linie klemmte links, `day()` klammerte auf 0 → das Fenster mit dem aktuellen
+  Moment (Vortages-05:00–05:00) war morgens unerreichbar.
+- Fix: pure `wallClockToSlot(min)` + `effectiveDay(pref, now)`; `epgProgAt` auf Slot-Basis
+  (alle Aufrufer inkl. `nowProg`/Home), `nowLineX`/`isNow` auf Slot-Basis, `day()` effektiv,
+  `setDayStep` pref-basiert, Init-Anker auf `day()`; Home 4× mit `effectiveDay(0, nowMin())`.
+- Neue JVM-Tests (EpgDataTest 22 → 26): Tail-Mapping, Tag-Shift, laufendes Nachtprogramm
+  statt Index 0, Tageszeit-Auswahl im Misch-Tag.
+- Build frisch: `BUILD SUCCESSFUL in 37 s` (45 Tasks, offline, `--rerun-tasks`), **69
+  JVM-Tests, 0 Failures/Errors** (XMLs 15:00). `git diff --check` sauber.
+- Kein Commit/Push/Reset; `CORE_TV_ACCEPTED` bleibt Claude-Verdikt.
+
 ## 2026-09-19 — Recovery-Runde 6: laufende EPG-Zeitbasis DST-korrekt abgeschlossen
 - Ausschließlich den angefangenen EPG-Zeitbasis-/Cache-Diff übernommen und dessen
   DST-Inkonsistenz repariert: lokale 05:00–05:00-Fenster statt `+24h`, lokale

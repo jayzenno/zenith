@@ -74,7 +74,9 @@ class EpgViewModel(private val container: AppContainer) : ViewModel() {
         val vis = currentVis(s)
         if (vis.isNotEmpty()) {
             row = vis.indexOf(s.currentChannel).coerceAtLeast(0)
-            ecol = epgProgAt(vis[row], s.epgDay, nowMin)
+            // Anchors on the effective display day so the Guide opens around "now" even
+            // before 05:00 (the current programme then lives in the previous window).
+            ecol = epgProgAt(vis[row], day(), nowMin)
         }
         viewModelScope.launch {
             container.channels.allLiveChannels().collect { list ->
@@ -208,7 +210,17 @@ class EpgViewModel(private val container: AppContainer) : ViewModel() {
         ecol = epgProgAt(vis[row], day(), nowMin)
     }
 
-    fun day(): Int = settings.value.epgDay.coerceIn(0, EPG_DAY_SLOTS - 1)
+    /**
+     * The effective display day: the preference ([ZenSettings.epgDay]) is clamped to the
+     * stored range and then shifted back by one while local time is before 05:00
+     * ([effectiveDay]). Without the shift the Guide could never open "around now" in the
+     * early morning — the current moment would sit in the previous 05:00–05:00 window,
+     * which the old hard clamp at 0 made unreachable.
+     */
+    fun day(): Int {
+        val pref = settings.value.epgDay.coerceIn(0, EPG_DAY_SLOTS - 1)
+        return effectiveDay(pref, nowMin)
+    }
 
     fun currentChannel(): Int {
         if (EPG_CHANNELS.isEmpty()) return 0
@@ -295,13 +307,17 @@ class EpgViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun setDayStep(d: Int) {
-        val np = clampInt(day() + d, 0, EPG_DAY_SLOTS - 1)
+        // Day stepping works on the PREFERENCE day (0..EPG_DAY_SLOTS-1); the displayed
+        // window is the effective day derived from it (morning hours shift back by one).
+        val pref = settings.value.epgDay.coerceIn(0, EPG_DAY_SLOTS - 1)
+        val np = clampInt(pref + d, 0, EPG_DAY_SLOTS - 1)
+        val target = effectiveDay(np, nowMin)
         viewModelScope.launch { container.settings.setEpgDay(np) }
         val vis = currentVis()
         if (vis.isNotEmpty()) {
-            ecol = epgProgAt(vis[row.coerceIn(0, vis.size - 1)], np, nowMin)
+            ecol = epgProgAt(vis[row.coerceIn(0, vis.size - 1)], target, nowMin)
         }
-        refreshPrograms(np)
+        refreshPrograms(target)
         toast(dayToast(np))
     }
 

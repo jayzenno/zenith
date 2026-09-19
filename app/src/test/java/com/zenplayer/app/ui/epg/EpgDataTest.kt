@@ -153,6 +153,61 @@ class EpgDataTest {
         assertEquals("Mittagsmagazin", prog?.t)
     }
 
+    // --- Early-morning "now" correctness (Core-TV gate: current time / now marker) ---
+
+    @Test
+    fun wallClockToSlot_mapsPreDawnToGridTail() {
+        // 00:00–04:59 occupy the tail of the 05:00–05:00 grid (1440–1739); the rest maps 1:1.
+        assertEquals(1440, wallClockToSlot(0))
+        assertEquals(1560, wallClockToSlot(120)) // 02:00 -> column 21
+        assertEquals(1739, wallClockToSlot(299)) // 04:59 -> last column
+        assertEquals(300, wallClockToSlot(300))  // 05:00 -> left edge
+        assertEquals(840, wallClockToSlot(840))  // 14:00 -> column 9
+        assertEquals(1439, wallClockToSlot(1439))
+    }
+
+    @Test
+    fun effectiveDay_shiftsPreDawnToPreviousBroadcastDay() {
+        // Before 05:00 the current moment belongs to the previous 05:00–05:00 window.
+        assertEquals(-1, effectiveDay(0, 120))   // 02:00 "Heute" -> window [gestern 05:00, heute 05:00)
+        assertEquals(0, effectiveDay(0, 300))    // 05:00 exact -> today's window
+        assertEquals(0, effectiveDay(0, 1439))   // 23:59 -> today's window
+        assertEquals(0, effectiveDay(1, 120))    // "morgen" pre-dawn -> today's window
+        assertEquals(5, effectiveDay(6, 120))    // last preference pre-dawn -> day 5 window
+    }
+
+    @Test
+    fun nowProg_selectsRunningEarlyMorningProgramme() {
+        EpgStore.clear()
+        // The previous broadcast window (day -1): a programme that started at 00:30 today
+        // lives in the TAIL columns (slot 1470 = 00:30 + 1440), not at the grid start.
+        EpgStore.setPrograms(0, -1, listOf(EpgProgram(s = 1470, e = 1560, t = "Nachtprogramm", c = "live")))
+
+        // At 02:00 (nowMin = 120) the running programme is the night one. Before the fix
+        // nowProg compared 120 against slots >= 300 and fell back to index 0 (05:00).
+        val prog = nowProg(0, -1, 120)
+        assertEquals("Nachtprogramm", prog?.t)
+    }
+
+    @Test
+    fun nowProg_earlyMorningDoesNotPickFirstProgram() {
+        EpgStore.clear()
+        // Mixed day: 05:00 morning show + early-morning tail programme of the window's
+        // following day. At 02:00 (now=120) the tail programme must be selected — NOT the
+        // first (05:00) entry.
+        EpgStore.setPrograms(
+            0, 0,
+            listOf(
+                EpgProgram(s = 300, e = 390, t = "Frühstücksfernsehen", c = "live"),
+                EpgProgram(s = 1560, e = 1620, t = "Spätspätprogramm", c = "live")
+            )
+        )
+        assertEquals(1, epgProgAt(0, 0, 120))
+        assertEquals("Spätspätprogramm", nowProg(0, 0, 120)?.t)
+        // During the day both consumers keep their documented behavior.
+        assertEquals("Frühstücksfernsehen", nowProg(0, 0, 330)?.t)
+    }
+
     @Test
     fun mapDbPrograms_dropsProgramsOutsideWindow() {
         val start = displayWindowStart(0)

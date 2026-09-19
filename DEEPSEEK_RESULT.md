@@ -1287,3 +1287,107 @@ und die 5-h-Wanduhr-Korrektur sind damit nicht ersetzt, sondern vervollständigt
 - Kein Gerät/`adb`; reale EPG-Darstellung, D-Pad und Wiedergabe sind nicht getestet.
 - Nach Wiederherstellung der WSL-Interop muss exakt der Offline-Gradle-Lauf mit
   `--rerun-tasks` wiederholt werden; erwartet sind 65 JVM-Tests (EpgData 22).
+
+---
+
+## Core-TV Runde (Code-Change): EPG-„Now“-Konsumenten auf gemeinsamer Slot-Basis + effektiver Anzeige-Tag
+
+`MODUS=core-tv`; `TO_DEEPSEEK.md` weiterhin nur Platzhalter, Working Tree war sauber auf
+`34d67a5`. Als genau EIN geschlossenes Vorhaben wurde der höchste unerfüllte
+Gate-Zusammenhang angegangen: **„Current time is correct“ / „live Now marker exists“ /
+„Guide opens around now“ für die Morgenstunden 00:00–04:59**.
+
+### Befund (im realen Code verifiziert)
+Die vergangenen Runden korrigierten die **Slot-Erzeugung** (`mapDbPrograms`: 05:00→300,
+12:00→720, DST-korrekte Wanduhr-Basis; 00:00–04:59 → Grid-Tail 1440–1739). Aber alle
+**„Now“-Konsumenten** liefen noch auf der falschen Basis:
+
+1. `epgProgAt(vi, day, min)` verglich rohe Wanduhr-Minuten (z. B. 120 = 02:00) direkt
+   gegen Slots ≥ 300 → morgens fiel die Auswahl auf das **erste 05:00-Programm**, obwohl
+   das laufende Programm im Tail (1440–1739) liegt.
+2. `ProgramRow.isNow = prog.s <= now && prog.e > now` matchte das laufende Nachtprogramm
+   nie; `nowLineX = (now − 300)` klemmte auf die linke Kante, während der Zeit-Header
+   `(h+5)%24` die echte Stundenspalte markierte (02:00 = Spalte 21).
+3. `day() = epgDay.coerceIn(0, …)` klammerte bei 0 → zwischen Mitternacht und 05:00 war
+   das Fenster, das den aktuellen Moment enthält (das **Vortags**-05:00–05:00-Fenster,
+   `effectiveDay`-Bedarf), **unerreichbar** — der Guide konnte morgens prinzipbedingt
+   nicht „um jetzt herum“ öffnen.
+4. Home („JETZT“/Hero/Favoriten/KanalHome) rief `nowProg(vi, 0, nowMin())` — derselbe
+   Basis-Sprung wie im Guide.
+Ab 05:00 (Normalfall, 20 von 24 h) waren alle Pfade weiterhin korrekt; betroffen war
+ausschließlich das 00:00–04:59-Fenster.
+
+### Änderungen
+- **`ui/epg/EpgData.kt`** — zwei neue pure, JVM-testbare Funktionen:
+  - `wallClockToSlot(min): Int = if (min < EPG_START_MIN) min + 24*60 else min` —
+    Inverse der DST-korrigierten `wallClockSlot`: 00:00–04:59 → 1440–1739 (Tail des
+    05:00–05:00-Grids), ab 05:00 identisch.
+  - `effectiveDay(pref, now): Int = if (now < EPG_START_MIN) pref - 1 else pref` — der
+    lokale 05:00–05:00-Tag, der `now` enthält.
+  - `epgProgAt` vergleicht jetzt via `wallClockToSlot(min)`; alle Aufrufer (`nowProg`,
+    Guide-Auswahl, Schnapp-/Auto-Now) erben den Fix. KDoc aktualisiert.
+- **`ui/epg/EpgScreen.kt`** — `nowLineX` und `ProgramRow.isNow` auf gemeinsame Slot-Basis
+  (`wallClockToSlot(now)`); Now-Linie und Now-Hervorhebung stimmen morgens mit dem Header
+  überein.
+- **`ui/epg/EpgViewModel.kt`** — `day()` liefert den effektiven Tag (`effectiveDay(pref,
+  nowMin)`, Klammerung der Präferenz auf den Speicherbereich); Init-Anker und
+  Auto-Now verankern damit im echten aktuellen Fenster; `setDayStep(d)` arbeitet
+  **präferenz-basiert** (`np = clamp(pref + d)`, `target = effectiveDay(np, nowMin)`) und
+  lädt per `refreshPrograms(target)` — kein Stau mehr bei Tag 0 vor 05:00.
+- **`ui/home/HomeScreen.kt`** — alle 4 `nowProg(vi, 0, nowMin())` → `nowProg(vi,
+  effectiveDay(0, nowMin()), nowMin())` (Home-„JETZT“/Hero/Favoriten/KanalHome korrekt
+  auch im Morgengrauen).
+- **`EpgDataTest.kt`** — 4 neue JVM-Tests (Klasse 22 → 26):
+  `wallClockToSlot`-Tail-Mapping (0→1440, 120→1560, 299→1739, 300→300, 840→840,
+  1439→1439), `effectiveDay`-Tagschift (0/120→−1, 0/300→0, 0/1439→0, 1/120→0, 6/120→5),
+  `nowProg` wählt das laufende Nachtprogramm (Tail statt Index 0), Misch-Tag mit
+  05:00- und 02:00-Programm wählt je Tageszeit das richtige.
+
+### Build & Tests
+```
+JAVA_HOME='C:\Program Files\Java\jdk-21.0.12.1' cmd.exe /c gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline --rerun-tasks
+BUILD SUCCESSFUL in 37 s, 45 Tasks executed
+```
+**69 JVM-Unit-Tests, 0 Failures/Errors** (XMLs frisch gelesen, 15:00): `EpgDataTest`
+**26**/26, `HomeDataTest` 10, `ChannelQualityTest` 10, `RecentWatchTest` 9,
+`FallbackPolicyTest` 4, `PlaybackStatusTest` 4, `PlayerDiagnosticsTest` 6.
+`git diff --check` sauber; kein Commit/Push/Reset.
+
+### Gate-Bezug
+- „Current time is correct“ — im gesamten 24-h-Zyklus, auch 00:00–04:59 (vorher klaffte
+  der Basis-Riss genau dort).
+- „live Now marker exists“ — Now-Linie + JETZT-Zellen-Hervorhebung stimmen morgens mit
+  dem echten laufenden Programm und dem Header überein.
+- „Guide opens around now“ — `day()`/Init verankern im Fenster, das den aktuellen Moment
+  enthält; Tag-Schritt bleibt auch vor 05:00 bedienbar.
+
+### Nicht verifiziert (kein Gerät/Stream)
+- Reale Guide-/Home-Darstellung im Morgenfenster und D-Pad-Zap auf TV-Hardware weiterhin
+  nicht getestet (`adb` nicht verfügbar). `BUILD SUCCESSFUL != echte Wiedergabe verifiziert`
+  gilt unverändert.
+- Grenzfall 04:59↔05:00 bei geöffnetem Guide ist Logik-/Test-abgesichert, nicht visuell.
+
+### Bekannte Folgepunkte (bewusst NICHT in dieser Runde)
+- Guide-Kontextmenü-Aktionen „Von Anfang an (Replay)“, „Merken“, „Aufnahme planen“
+  melden weiterhin nur Toasts ohne echte Funktion (Phase B Shared Catchup/DVR).
+- `dayLabel(day())` zeigt morgens den Vortag als Fensterstart — ehrlich (das 05:00-Fenster
+  beginnt dort), aber z. B. ein „bis 05:00“-Hinweis wäre komfortabler (Kosmetik).
+- `dayToast` benennt die Präferenz („Heute“), nicht das effektive Fenster (Kosmetik).
+
+### ⚠ Parallel-Session-Nachtrag (verpflichtend lesen)
+Während der Doku-Phase dieser Runde schrieb eine **zweite, gleichzeitig laufende
+Implementer-Session** (PID 22402, gestartet 14:52, Log `.ai-collab/logs/20260919-145236/`)
+zusätzliche, uncommittete Dateien in denselben Working Tree — den bekannten Folgepunkt
+„Home ← EpgRepository-Direktbindung“:
+
+- `data/db/Daos.kt`: `observeForWindow(...): Flow<List<EpgProgramEntity>>`
+- `data/repo/EpgRepository.kt`: `programsForWindowFlow(day)` (über `displayWindowStart/End`)
+- `ui/home/HomeData.kt`: `homeNowPrograms(dbPrograms, channels, now)` (nutzt meine neuen
+  `wallClockToSlot`/`mapDbPrograms`)
+
+Diese Dateien wurden **nach** dem oben dokumentierten Build (15:00) geschrieben
+(mtimes 15:01–15:03) und sind von mir weder compiliert noch getestet; die Session war zum
+Schreibzeitpunkt noch aktiv und hat weder meine fünf Dateien überschrieben noch HomeScreen
+bereits umgehängt. **Es wurde keine destruktive Aktion unternommen**; der Zustand ist als
+gemeinsames Review-Volumen an Claude weitergereicht. Eine frische Gesamt-Verifikation kann
+erst nach Abschluss der Parallel-Session sinnvoll laufen (Gradle-Lock / build-Verzeichnis).

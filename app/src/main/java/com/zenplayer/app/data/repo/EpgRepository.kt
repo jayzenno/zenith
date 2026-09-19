@@ -24,6 +24,18 @@ class EpgRepository(private val dao: EpgDao) {
         return dao.getForWindow(start, end).map { it.toModel() }
     }
 
+    /**
+     * Reactive window programmes: emits whenever Room's EPG table changes (sync, prune,
+     * provider re-sync). The Home screen uses this directly — it shows real "now" data
+     * without requiring a prior Guide visit (which alone used to populate the in-memory
+     * [com.zenplayer.app.ui.epg.EpgStore] the Home previously read through `nowProg`).
+     */
+    fun programsForWindowFlow(day: Int): Flow<List<EpgProgram>> {
+        val start = com.zenplayer.app.ui.epg.displayWindowStart(day)
+        val end = com.zenplayer.app.ui.epg.displayWindowEnd(day)
+        return dao.observeForWindow(start, end).map { list -> list.map { it.toModel() } }
+    }
+
     suspend fun store(programs: List<EpgProgram>) {
         if (programs.isEmpty()) return
         dao.upsertAll(programs.map(EpgProgramEntity::fromModel))
