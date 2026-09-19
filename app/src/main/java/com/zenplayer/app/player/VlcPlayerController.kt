@@ -18,7 +18,7 @@ class VlcPlayerController(context: Context) : ZenPlayerController {
 
     private val libVLC: LibVLC = LibVLC(
         context,
-        listOf("--no-stats", "--no-drop-late-frames", "--network-caching=800")
+        mutableListOf("--no-stats", "--no-drop-late-frames", "--network-caching=800")
     )
 
     private var mediaPlayer: MediaPlayer? = null
