@@ -4,7 +4,7 @@ set -uo pipefail
 MODE="${1:-improve}"
 MAX_ROUNDS="${2:-0}"
 ROUND=1
-ENABLE_CODEX="${ENABLE_CODEX:-0}"
+ENABLE_CODEX="${ENABLE_CODEX:-1}"
 
 [[ "$MODE" == "fix" || "$MODE" == "improve" ]] || { echo "Usage: ./ai-team.sh [fix|improve] [max_rounds]"; exit 1; }
 [[ "$MAX_ROUNDS" =~ ^[0-9]+$ ]] || { echo "max_rounds muss 0 (unbegrenzt) oder eine positive Zahl sein."; exit 1; }
@@ -52,7 +52,7 @@ PRIORITÄT:
 9 Visual Polish
 10 sinnvolle Zusatzfeatures
 
-Keine Änderungen nur für Aktivität. Große Architekturentscheidungen erst untersuchen, dann inkrementell umsetzen. Kein reset, kein push, keine destruktiven Git-Aktionen. Nach jeder Arbeit Build/Tests soweit passend, Regressionen und git diff prüfen, Handoff dokumentieren. Build-Erfolg ist kein Hardware-/Playback-Nachweis.
+Keine Änderungen nur für Aktivität. Große Architekturentscheidungen erst untersuchen, dann inkrementell umsetzen. Kein reset, kein push, keine destruktiven Git-Aktionen. Nach jeder Arbeit Build/Tests soweit passend, Regressionen und git diff prüfen, Handoff dokumentieren. Build-Erfolg ist kein Hardware-/Playback-Nachweis. Build-Infrastruktur gehört zur Aufgabe: bei JDK/JAVA_HOME/Gradle/Android-SDK/Dependency-Problemen Ursache selbst diagnostizieren und soweit im Projekt/Workspace sicher möglich beheben, danach den Build erneut versuchen. Keine blinden destruktiven Systemänderungen; echte externe Blocker präzise dokumentieren.
 MISSION
 
 is_quota_error() {
@@ -94,7 +94,7 @@ run_codex() {
   local prompt="$1"
   if [[ "$ENABLE_CODEX" != "1" ]] || ! command -v codex >/dev/null 2>&1; then return 3; fi
   set +e
-  codex exec "$prompt" 2>&1 | tee "$log"
+  codex exec -m gpt-5.6-terra -c 'model_reasoning_effort="medium"' --sandbox workspace-write "$prompt" 2>&1 | tee "$log"
   local rc=${PIPESTATUS[0]}
   set -e
   if is_quota_error "$log"; then mark_unavailable codex; return 2; fi
@@ -112,7 +112,7 @@ finish_current_task_with_fallback() {
 }
 
 echo "Zenith AI Team | mode=$MODE | max=$MAX_ROUNDS | start=$START_COMMIT"
-echo "Quota-Fallback aktiv. Codex wird nach Einrichtung separat aktiviert."
+echo "Quota-Fallback aktiv. Codex ist als sparsamer dritter Fallback/Verifier aktiviert."
 
 while [[ "$MAX_ROUNDS" -eq 0 || "$ROUND" -le "$MAX_ROUNDS" ]]; do
   if [[ "$MAX_ROUNDS" -eq 0 ]]; then echo "========== RUNDE $ROUND / unbegrenzt =========="; else echo "========== RUNDE $ROUND / $MAX_ROUNDS =========="; fi
